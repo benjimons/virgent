@@ -26,9 +26,13 @@ DEFAULT_POLICY: dict = {
         "allow": [
             "agent.init",
             "ingest.*",
+            "collect.host",
+            "collect.runtime",
             "scan.*",
             "report.*",
             "audit.*",
+            "fim.*",
+            "monitor.*",
             "llm.complete",
         ],
         "require_approval": [

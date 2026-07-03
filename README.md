@@ -24,12 +24,22 @@ pip install -e '.[llm]'   # + Claude-backed reasoning
 export VIRGENT_AUDIT_KEY="$(openssl rand -hex 32)"   # enables HMAC-signed audit records
 
 virgent init                          # creates .virgent/ with a default policy
+virgent list                          # show every ingestor, capability, and framework
 virgent ingest ./my-repo --git-history
-virgent scan                          # secrets, dependency, IaC capabilities (offline)
+virgent host --scan                   # read-only host hardening inspection
+virgent scan                          # secrets, dependency, IaC, host capabilities (offline)
 virgent scan --online --approve collect.web   # + OSV vulnerability lookups (audited approval)
 virgent scan --llm                    # + Claude-assisted code review (needs ANTHROPIC_API_KEY)
 virgent report -o report.md           # auditor-ready report with attestation
 virgent audit verify                  # exit 0 iff the chain is intact
+```
+
+Or run the whole thing in one shot — ingest a repo (and its git history), inspect
+the host, scan with every capability, and emit an attested report:
+
+```bash
+virgent assess ./my-repo --host --git-history --online --llm \
+    --approve collect.web -o report.md
 ```
 
 Ask the (audited, redacted) reasoning layer a question:

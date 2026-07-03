@@ -22,12 +22,23 @@ from .audit import AuditLog
 from .capabilities import (
     Capability,
     DependencyAuditCapability,
+    HostInspectionCapability,
     IaCCapability,
     LLMReviewCapability,
+    RuntimeInspectionCapability,
     SecretScanCapability,
 )
 from .compliance.report import generate_report
-from .ingest import FileIngestor, GitHistoryIngestor, Ingestor, WebCollector, query_osv
+from .ingest import (
+    FileIngestor,
+    GitHistoryIngestor,
+    HostIngestor,
+    Ingestor,
+    WebCollector,
+    query_osv,
+)
+from .ingest.runtime import RuntimeIngestor
+from .integrity import IntegrityMonitor
 from .llm.provider import LLMResult, ReasoningProvider
 from .models import Actor, Evidence, Finding
 from .policy import PolicyEngine, PolicyViolation
@@ -37,6 +48,9 @@ from .redaction import redact
 __version__ = "0.1.0"
 
 DEFAULT_ACTOR = Actor(id="virgent", type="agent")
+
+# ingestor name -> audited action (default is ingest.<name>)
+_INGEST_ACTIONS = {"web": "collect.web", "host": "collect.host", "runtime": "collect.runtime"}
 
 
 class SecurityAgent:
@@ -61,6 +75,8 @@ class SecurityAgent:
         self.ingestors: dict[str, Ingestor] = {
             "file": FileIngestor(),
             "git": GitHistoryIngestor(),
+            "host": HostIngestor(),
+            "runtime": RuntimeIngestor(),
             "web": WebCollector(
                 allowed_domains=(self.policy.policy.get("network") or {}).get("allowed_domains") or [],
             ),
@@ -69,8 +85,12 @@ class SecurityAgent:
         self.register_capability(SecretScanCapability())
         self.register_capability(DependencyAuditCapability())
         self.register_capability(IaCCapability())
+        self.register_capability(HostInspectionCapability())
+        self.register_capability(RuntimeInspectionCapability())
         if self.provider is not None:
             self.register_capability(LLMReviewCapability(reason=self.reason))
+
+        self.integrity = IntegrityMonitor(self.workdir / "fim_baseline.json")
 
         self.audit.record("agent.init", params={
             "version": __version__,
@@ -108,7 +128,7 @@ class SecurityAgent:
 
     def ingest(self, target: str, ingestor: str = "file") -> list[Evidence]:
         """Ingest a source; every item is provenance-stamped and audited."""
-        action = f"ingest.{ingestor}" if ingestor != "web" else "collect.web"
+        action = _INGEST_ACTIONS.get(ingestor, f"ingest.{ingestor}")
         decision = self._enforce(action, {"target": target})
         reader = self.ingestors[ingestor]
         evidence: list[Evidence] = []
@@ -219,6 +239,60 @@ class SecurityAgent:
         with self.findings_path.open("a", encoding="utf-8") as f:
             for finding in findings:
                 f.write(json.dumps(finding.to_dict(), ensure_ascii=False, default=str) + "\n")
+
+    # -- file integrity monitoring --------------------------------------------
+
+    def integrity_baseline(self, paths: list[str]) -> dict:
+        """Record a known-good hash baseline for critical files (audited)."""
+        self._enforce("fim.baseline", {"paths": paths})
+        # register each file with provenance so the baseline is provable
+        for p in paths:
+            try:
+                content = Path(p).read_text(errors="replace")
+            except OSError:
+                continue
+            self.provenance.register(
+                source=p, method="fim.baseline", kind="baseline",
+                content=content, collector=self.actor,
+            )
+        summary = self.integrity.baseline(paths)
+        self.audit.record("fim.baseline", params=summary)
+        return summary
+
+    def integrity_check(self) -> list[Finding]:
+        """Detect modification/removal of baselined files (audited)."""
+        self._enforce("fim.check", {"watched": len(self.integrity.watched)})
+        findings = self.integrity.check()
+        self._persist_findings(findings)
+        self.audit.record("fim.check", params={
+            "watched": len(self.integrity.watched),
+            "changes": len(findings),
+            "finding_ids": [f.id for f in findings],
+        })
+        return findings
+
+    # -- continuous monitoring ------------------------------------------------
+
+    def monitor_tick(self, capabilities: list[str] | None = None) -> list[Finding]:
+        """One live snapshot + scan cycle for continuous monitoring.
+
+        Re-ingests live host/runtime state, scans, checks file integrity, and
+        records a ``monitor.tick`` audit event. Returns this tick's findings.
+        """
+        self._enforce("monitor.tick", {"capabilities": capabilities})
+        caps = capabilities or ["host", "runtime"]
+        if "host" in caps:
+            self.ingest("localhost", ingestor="host")
+        if "runtime" in caps:
+            self.ingest("localhost", ingestor="runtime")
+        findings = self.scan(capabilities=caps)
+        if self.integrity.watched:
+            findings = findings + self.integrity_check()
+        self.audit.record("monitor.tick", params={
+            "capabilities": caps,
+            "findings": len(findings),
+        })
+        return findings
 
     def load_findings(self, dedup: bool = True) -> list[Finding]:
         if not self.findings_path.exists():

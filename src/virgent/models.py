@@ -104,12 +104,18 @@ class Finding:
 
     @property
     def fingerprint(self) -> str:
-        """Stable identity for dedup across runs (independent of timestamps)."""
+        """Stable semantic identity for dedup across runs and monitoring ticks.
+
+        Deliberately excludes evidence IDs and timestamps: the same weakness
+        re-observed over time (fresh evidence each snapshot) must collapse to
+        one entry in a vulnerability register, while distinct issues stay
+        distinct via their location.
+        """
         return sha256_hex(canonical_json({
             "capability": self.capability,
             "title": self.title,
             "location": self.location,
-            "evidence": sorted(self.evidence_ids),
+            "severity": self.severity.value,
         }))[:16]
 
     def to_dict(self) -> dict:

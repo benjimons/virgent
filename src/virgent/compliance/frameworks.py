@@ -33,12 +33,34 @@ CONTROLS: dict[str, dict] = {
     "NIST:CM-6": {"framework": "NIST-800-53", "title": "Configuration settings"},
     "NIST:SR-3": {"framework": "NIST-800-53", "title": "Supply chain controls and processes"},
     "NIST:AU-2": {"framework": "NIST-800-53", "title": "Event logging"},
+    "NIST:AU-6": {"framework": "NIST-800-53", "title": "Audit record review, analysis, and reporting"},
+    "NIST:SI-4": {"framework": "NIST-800-53", "title": "System monitoring"},
+    "NIST:SI-7": {"framework": "NIST-800-53", "title": "Software, firmware, and information integrity"},
     # OWASP Top 10 (2021)
     "OWASP:A02": {"framework": "OWASP-Top10", "title": "Cryptographic failures"},
     "OWASP:A05": {"framework": "OWASP-Top10", "title": "Security misconfiguration"},
     "OWASP:A06": {"framework": "OWASP-Top10", "title": "Vulnerable and outdated components"},
     "OWASP:A07": {"framework": "OWASP-Top10", "title": "Identification and authentication failures"},
     "OWASP:A08": {"framework": "OWASP-Top10", "title": "Software and data integrity failures"},
+    # CIS Benchmarks (host hardening families)
+    "CIS:1.4": {"framework": "CIS", "title": "Secure permissions on critical system files"},
+    "CIS:2.2": {"framework": "CIS", "title": "Minimize exposed network services"},
+    "CIS:3.3": {"framework": "CIS", "title": "Network kernel parameters (host hardening)"},
+    "CIS:4.4": {"framework": "CIS", "title": "Host-based firewall configured"},
+    "CIS:5.2": {"framework": "CIS", "title": "SSH server configuration hardening"},
+    "CIS:5.4": {"framework": "CIS", "title": "User accounts and access controls"},
+    # Additional NIST SP 800-53 controls exercised by host inspection
+    "NIST:AC-2": {"framework": "NIST-800-53", "title": "Account management"},
+    "NIST:AC-6": {"framework": "NIST-800-53", "title": "Least privilege"},
+    "NIST:AC-17": {"framework": "NIST-800-53", "title": "Remote access"},
+    "NIST:CM-7": {"framework": "NIST-800-53", "title": "Least functionality"},
+    "NIST:SC-7": {"framework": "NIST-800-53", "title": "Boundary protection"},
+    # Additional ISO/IEC 27001:2022 Annex A controls
+    "ISO27001:A.5.15": {"framework": "ISO27001", "title": "Access control"},
+    "ISO27001:A.5.16": {"framework": "ISO27001", "title": "Identity management"},
+    "ISO27001:A.8.5": {"framework": "ISO27001", "title": "Secure authentication"},
+    "ISO27001:A.8.20": {"framework": "ISO27001", "title": "Networks security"},
+    "ISO27001:A.8.16": {"framework": "ISO27001", "title": "Monitoring activities"},
 }
 
 

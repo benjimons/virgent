@@ -24,6 +24,8 @@ class Capability(ABC):
 from .secrets import SecretScanCapability          # noqa: E402
 from .dependencies import DependencyAuditCapability  # noqa: E402
 from .iac import IaCCapability                      # noqa: E402
+from .host import HostInspectionCapability          # noqa: E402
+from .runtime import RuntimeInspectionCapability     # noqa: E402
 from .llm_review import LLMReviewCapability         # noqa: E402
 
 __all__ = [
@@ -31,5 +33,7 @@ __all__ = [
     "SecretScanCapability",
     "DependencyAuditCapability",
     "IaCCapability",
+    "HostInspectionCapability",
+    "RuntimeInspectionCapability",
     "LLMReviewCapability",
 ]

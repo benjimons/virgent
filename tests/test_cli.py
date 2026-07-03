@@ -38,6 +38,28 @@ def test_cli_init_ingest_scan_report_verify(tmp_path, capsys):
     assert verify_out["records"] > 3
 
 
+def test_cli_list_shows_all_features(tmp_path, capsys):
+    wd = str(tmp_path / "wd")
+    assert main(["--workdir", wd, "list"]) == 0
+    out = capsys.readouterr().out
+    for capability in ("secrets", "dependencies", "iac", "host"):
+        assert capability in out
+    for framework in ("SOC2", "ISO27001", "NIST-800-53", "OWASP-Top10", "CIS"):
+        assert framework in out
+
+
+def test_cli_assess_pipeline(tmp_path, capsys):
+    wd = str(tmp_path / "wd")
+    repo = seed_repo(tmp_path)
+    main(["--workdir", wd, "init"])
+    rc = main(["--workdir", wd, "assess", str(repo), "--format", "json",
+               "-o", str(tmp_path / "assess.json")])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "audit chain verified: True" in out
+    assert json.loads((tmp_path / "assess.json").read_text())["summary"]["findings_total"] >= 1
+
+
 def test_cli_online_scan_requires_approval(tmp_path, capsys):
     wd = str(tmp_path / "wd")
     repo = seed_repo(tmp_path)
