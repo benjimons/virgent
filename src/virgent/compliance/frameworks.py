@@ -36,7 +36,13 @@ CONTROLS: dict[str, dict] = {
     "NIST:AU-6": {"framework": "NIST-800-53", "title": "Audit record review, analysis, and reporting"},
     "NIST:SI-4": {"framework": "NIST-800-53", "title": "System monitoring"},
     "NIST:SI-7": {"framework": "NIST-800-53", "title": "Software, firmware, and information integrity"},
+    "NIST:CA-8": {"framework": "NIST-800-53", "title": "Penetration testing"},
+    "NIST:RA-7": {"framework": "NIST-800-53", "title": "Risk response"},
+    "NIST:IR-4": {"framework": "NIST-800-53", "title": "Incident handling"},
+    "NIST:IR-5": {"framework": "NIST-800-53", "title": "Incident monitoring"},
+    "NIST:IR-6": {"framework": "NIST-800-53", "title": "Incident reporting"},
     # OWASP Top 10 (2021)
+    "OWASP:A01": {"framework": "OWASP-Top10", "title": "Broken access control"},
     "OWASP:A02": {"framework": "OWASP-Top10", "title": "Cryptographic failures"},
     "OWASP:A05": {"framework": "OWASP-Top10", "title": "Security misconfiguration"},
     "OWASP:A06": {"framework": "OWASP-Top10", "title": "Vulnerable and outdated components"},

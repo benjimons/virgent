@@ -39,6 +39,9 @@ from .ingest import (
 )
 from .ingest.runtime import RuntimeIngestor
 from .integrity import IntegrityMonitor
+from .pentest import PenTester
+from .policy import PolicyDecision
+from .vulnmgmt import VulnerabilityRegister
 from .llm.provider import LLMResult, ReasoningProvider
 from .models import Actor, Evidence, Finding
 from .policy import PolicyEngine, PolicyViolation
@@ -91,6 +94,8 @@ class SecurityAgent:
             self.register_capability(LLMReviewCapability(reason=self.reason))
 
         self.integrity = IntegrityMonitor(self.workdir / "fim_baseline.json")
+        self.vulns = VulnerabilityRegister(self.workdir / "vuln_register.json")
+        self.pentest_prober = None  # inject a Prober for tests/dry-runs
 
         self.audit.record("agent.init", params={
             "version": __version__,
@@ -270,6 +275,60 @@ class SecurityAgent:
             "finding_ids": [f.id for f in findings],
         })
         return findings
+
+    # -- penetration testing (authorized + scope-gated) -----------------------
+
+    def pentest(self, targets: list[dict]) -> list[Finding]:
+        """Run non-destructive active probes against authorized targets.
+
+        Requires an approval for ``pentest.run`` AND every target host must be
+        inside the policy ``pentest.scope`` allowlist. Findings are marked
+        ``verified`` and fed into the vulnerability register.
+        """
+        decision = self._enforce("pentest.run", {"hosts": [t.get("host") for t in targets]})
+        for target in targets:
+            host = target.get("host", "")
+            if not self.policy.pentest_allowed(host):
+                self.audit.record("pentest.run", params={"host": host},
+                                  outcome="denied:scope",
+                                  detail="host is not in the authorized pentest scope")
+                raise PolicyViolation(PolicyDecision(
+                    "pentest.run", "deny", "pentest.scope",
+                    f"host '{host}' is not in the authorized pentest scope"))
+        tester = PenTester(prober=self.pentest_prober) if self.pentest_prober else PenTester()
+        findings, transcript = tester.run(targets)
+        ev = self.provenance.register(
+            source="pentest:transcript", method="pentest.probe", kind="pentest",
+            content=transcript, collector=self.actor,
+            metadata={"hosts": [t.get("host") for t in targets]},
+        )
+        for f in findings:
+            f.evidence_ids = [ev.id]
+        self._persist_findings(findings)
+        self.audit.record("pentest.run", params={
+            "hosts": [t.get("host") for t in targets],
+            "findings": len(findings),
+            "approved_by": decision.approved_by,
+            "transcript_sha256": ev.sha256,
+        })
+        return findings
+
+    # -- vulnerability management ---------------------------------------------
+
+    def sync_vulns(self) -> dict:
+        """Merge all findings into the managed vulnerability register (audited)."""
+        self._enforce("vulns.sync")
+        summary = self.vulns.sync(self.load_findings())
+        self.audit.record("vulns.sync", params=summary)
+        return summary
+
+    def set_vuln_status(self, fingerprint: str, status: str, note: str = "") -> dict:
+        self._enforce("vulns.status", {"fingerprint": fingerprint, "status": status})
+        entry = self.vulns.set_status(fingerprint, status, actor=self.actor.id, note=note)
+        self.audit.record("vulns.status", params={
+            "fingerprint": fingerprint, "status": status, "note": note,
+        })
+        return entry.to_dict()
 
     # -- continuous monitoring ------------------------------------------------
 

@@ -131,6 +131,51 @@ def cmd_watch(args) -> int:
     return 0
 
 
+def _parse_target(spec: str) -> dict:
+    """host or host:port,port,..."""
+    if ":" in spec:
+        host, _, ports = spec.partition(":")
+        return {"host": host, "ports": [int(p) for p in ports.split(",") if p.strip()]}
+    return {"host": spec}
+
+
+def cmd_pentest(args) -> int:
+    agent = _agent(args)
+    approver = Actor(id=f"cli:{getpass.getuser()}", type="human")
+    if args.authorize:
+        agent.approve("pentest.*", approver)
+    targets = [_parse_target(t) for t in args.target]
+    findings = agent.pentest(targets)
+    _print_findings(findings)
+    print(f"\n{len(findings)} verified finding(s) from active probing.")
+    return 0
+
+
+def cmd_vulns(args) -> int:
+    agent = _agent(args)
+    if args.vulns_command == "sync":
+        summary = agent.sync_vulns()
+        print(f"register: +{summary['added']} new, {summary['reobserved']} re-observed, "
+              f"{summary['reopened']} reopened, {summary['total']} total")
+        return 0
+    if args.vulns_command == "summary":
+        s = agent.vulns.summary()
+        print(json.dumps(s, indent=2))
+        return 0
+    if args.vulns_command == "list":
+        entries = agent.vulns.entries(status=args.status, open_only=args.open)
+        for e in entries:
+            print(f"[risk {e.risk:3}] {e.status:13} {e.fingerprint}  "
+                  f"{e.finding['severity']:8} {e.finding['title']}")
+        print(f"\n{len(entries)} entr(y/ies).")
+        return 0
+    if args.vulns_command == "status":
+        entry = agent.set_vuln_status(args.fingerprint, args.state, note=args.note or "")
+        print(f"{args.fingerprint} -> {entry['status']}")
+        return 0
+    return 2
+
+
 def cmd_scan(args) -> int:
     agent = _agent(args, with_provider=args.llm)
     for pattern in args.approve or []:
@@ -264,6 +309,23 @@ def main(argv: list[str] | None = None) -> int:
     p_watch.add_argument("--rounds", type=int, default=0, help="stop after N ticks (default: run forever)")
     p_watch.add_argument("--capability", action="append", help="capabilities to run each tick")
 
+    p_pentest = sub.add_parser("pentest", help="authorized, non-destructive active probing (scope-gated)")
+    p_pentest.add_argument("target", nargs="+", help="host or host:port,port (must be in policy pentest.scope)")
+    p_pentest.add_argument("--authorize", action="store_true",
+                          help="record your approval for pentest.* for this run")
+
+    p_vulns = sub.add_parser("vulns", help="vulnerability management register")
+    vsub = p_vulns.add_subparsers(dest="vulns_command", required=True)
+    vsub.add_parser("sync", help="merge current findings into the register")
+    vsub.add_parser("summary", help="register summary (counts, risk, overdue)")
+    p_vl = vsub.add_parser("list", help="list register entries by risk")
+    p_vl.add_argument("--status", help="filter by lifecycle status")
+    p_vl.add_argument("--open", action="store_true", help="show only open/acknowledged")
+    p_vs = vsub.add_parser("status", help="set the lifecycle status of an entry")
+    p_vs.add_argument("fingerprint")
+    p_vs.add_argument("state", choices=sorted(["open", "acknowledged", "resolved", "accepted", "false_positive"]))
+    p_vs.add_argument("--note", default="")
+
     p_scan = sub.add_parser("scan", help="run security capabilities over ingested evidence")
     p_scan.add_argument("--capability", action="append", help="run only this capability (repeatable)")
     p_scan.add_argument("--online", action="store_true", help="enable OSV vulnerability lookups (network)")
@@ -301,6 +363,8 @@ def main(argv: list[str] | None = None) -> int:
         "runtime": cmd_runtime,
         "fim": cmd_fim,
         "watch": cmd_watch,
+        "pentest": cmd_pentest,
+        "vulns": cmd_vulns,
         "scan": cmd_scan,
         "assess": cmd_assess,
         "report": cmd_report,

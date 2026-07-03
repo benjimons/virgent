@@ -33,16 +33,24 @@ DEFAULT_POLICY: dict = {
             "audit.*",
             "fim.*",
             "monitor.*",
+            "vulns.*",
+            "soc.*",
             "llm.complete",
         ],
         "require_approval": [
             "collect.web",
+            "pentest.*",
             "remediate.*",
+            "respond.*",
         ],
         "deny": [],
     },
     "network": {
         "allowed_domains": ["api.osv.dev"],
+    },
+    "pentest": {
+        # explicit target allowlist; empty means no host may be probed
+        "scope": [],
     },
     "llm": {
         "enabled": True,
@@ -156,6 +164,31 @@ class PolicyEngine:
             entry = entry.lower()
             if host == entry or host.endswith("." + entry):
                 return True
+        return False
+
+    def pentest_allowed(self, host: str) -> bool:
+        """True if ``host`` is inside the authorized penetration-testing scope.
+
+        Scope entries may be exact hostnames/IPs, ``.suffix`` domain matches,
+        or CIDR ranges (e.g. ``10.0.0.0/24``).
+        """
+        import ipaddress
+        scope = (self.policy.get("pentest") or {}).get("scope") or []
+        host_l = host.lower()
+        for entry in scope:
+            entry = str(entry).strip().lower()
+            if not entry:
+                continue
+            if entry.startswith(".") and host_l.endswith(entry):
+                return True
+            if host_l == entry:
+                return True
+            if "/" in entry:
+                try:
+                    if ipaddress.ip_address(host) in ipaddress.ip_network(entry, strict=False):
+                        return True
+                except ValueError:
+                    continue
         return False
 
     # -- llm ----------------------------------------------------------------
