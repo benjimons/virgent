@@ -426,6 +426,40 @@ class SecurityAgent:
         req = self.broker.open(action_name, sensitivity, context, required_role, level)
         raise EscalationRequired(req)
 
+    def soc_runbooks(self, incident_id: str) -> list[dict]:
+        """Return the org runbooks that apply to an incident's alerts."""
+        from .org import select_runbooks
+        inc = self.soc.casebook.get_incident(incident_id)
+        return select_runbooks(inc.rules)
+
+    # -- security-program posture ---------------------------------------------
+
+    def program_posture(self) -> dict:
+        """Tie live agent state back to the security org and NIST CSF functions."""
+        self._enforce("report.posture")
+        from .org import program_posture
+        findings = self.load_findings()
+        vuln_summary = self.vulns.summary().get("by_severity", {})
+        open_incidents = sum(
+            1 for i in self.soc.casebook.all_incidents()
+            if i.status not in ("resolved",))
+        # capabilities plus the always-available engine subsystems
+        active = list(self.capabilities) + ["soc", "fim", "pentest"]
+        posture = program_posture(
+            active_capabilities=active,
+            findings=findings,
+            open_vulns_by_severity=vuln_summary,
+            open_incidents=open_incidents,
+            pending_decisions=len(self.broker.pending()),
+            audit_ok=self.verify_audit().ok,
+        )
+        self.audit.record("report.posture", params={
+            "maturity_score": posture["maturity_score"],
+            "maturity_band": posture["maturity_band"],
+            "csf_functions_covered": posture["csf_functions_covered"],
+        })
+        return posture
+
     # -- human-in-the-loop decisions ------------------------------------------
 
     def resolve_decision(self, decision_id: str, decision: str, resolver: str,

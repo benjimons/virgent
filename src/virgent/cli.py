@@ -306,6 +306,68 @@ def cmd_list(args) -> int:
     return 0
 
 
+def cmd_org(args) -> int:
+    from .org import FUNCTIONS, RACI, ROLES, RUNBOOKS, TEAMS, escalation_chain
+    if args.org_command == "overview":
+        print("Security organization (NIST CSF-aligned):\n")
+        for code, fn in FUNCTIONS.items():
+            print(f"  {code} {fn.name:10} owner={TEAMS[fn.owning_team].name}")
+            print(f"       {fn.outcome}")
+            print(f"       capabilities: {', '.join(fn.capabilities)}")
+        return 0
+    if args.org_command == "teams":
+        for t in TEAMS.values():
+            print(f"{t.name} ({', '.join(t.functions)}) — {t.mission}")
+            print(f"  roles: {', '.join(t.roles)}")
+        return 0
+    if args.org_command == "roles":
+        for r in ROLES.values():
+            print(f"{r.title} [access={r.access_role}]"
+                  + (f" -> {r.reports_to}" if r.reports_to else ""))
+            for resp in r.responsibilities:
+                print(f"  - {resp}")
+        return 0
+    if args.org_command == "raci":
+        for fn, assign in RACI.items():
+            print(f"{fn}: " + ", ".join(f"{role}={ra}" for role, ra in assign.items()))
+        return 0
+    if args.org_command == "escalation":
+        print("escalation chain:", " -> ".join(escalation_chain("agent")))
+        return 0
+    if args.org_command == "runbook":
+        if args.name and args.name in RUNBOOKS:
+            rb = RUNBOOKS[args.name]
+            print(f"# {rb['title']}  (owner: {rb['owner']})")
+            print(f"triggers: {', '.join(rb['triggers'])}")
+            print(f"controls: {', '.join(rb['controls'])}")
+            for i, step in enumerate(rb["steps"], 1):
+                print(f"  {i}. {step}")
+        else:
+            for name, rb in RUNBOOKS.items():
+                print(f"  {name:24} {rb['title']}")
+        return 0
+    return 2
+
+
+def cmd_posture(args) -> int:
+    agent = _agent(args)
+    posture = agent.program_posture()
+    print(f"Security program maturity: {posture['maturity_score']}/100 "
+          f"({posture['maturity_band']})")
+    print(f"CSF functions covered: {posture['csf_functions_covered']}/6")
+    for code, info in posture["org"].items():
+        mark = "✓" if info["covered"] else "·"
+        print(f"  {mark} {code} {info['function']:10} ({info['owning_team']})")
+    ops = posture["operations"]
+    print(f"\ncontrols with evidence: {posture['controls_with_evidence']} "
+          f"across {len(posture['frameworks_touched'])} frameworks")
+    print(f"open vulnerabilities: {ops['open_vulnerabilities']}")
+    print(f"open incidents: {ops['open_incidents']} | "
+          f"pending decisions: {ops['pending_decisions']} | "
+          f"audit verified: {ops['audit_chain_verified']}")
+    return 0
+
+
 def cmd_frameworks(args) -> int:
     from .compliance.frameworks import CONTROLS, framework_size, frameworks
     print(f"{len(CONTROLS)} controls across {len(frameworks())} frameworks:\n")
@@ -366,6 +428,18 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("list", help="list all ingestors, capabilities, and frameworks")
     p_fw = sub.add_parser("frameworks", help="show the compliance control catalog")
     p_fw.add_argument("--framework", help="list all controls for one framework")
+
+    p_org = sub.add_parser("org", help="the security organization: functions, teams, roles, runbooks")
+    org_sub = p_org.add_subparsers(dest="org_command", required=True)
+    org_sub.add_parser("overview", help="CSF functions and owning teams")
+    org_sub.add_parser("teams", help="teams and their missions")
+    org_sub.add_parser("roles", help="roles and responsibilities")
+    org_sub.add_parser("raci", help="RACI matrix by function")
+    org_sub.add_parser("escalation", help="the escalation chain")
+    p_rb = org_sub.add_parser("runbook", help="show a runbook (or list all)")
+    p_rb.add_argument("name", nargs="?", default=None)
+
+    sub.add_parser("posture", help="security-program posture (CSF coverage + live state)")
 
     p_ingest = sub.add_parser("ingest", help="ingest a file, directory, or repo")
     p_ingest.add_argument("target")
@@ -462,6 +536,8 @@ def main(argv: list[str] | None = None) -> int:
         "init": cmd_init,
         "list": cmd_list,
         "frameworks": cmd_frameworks,
+        "org": cmd_org,
+        "posture": cmd_posture,
         "ingest": cmd_ingest,
         "host": cmd_host,
         "runtime": cmd_runtime,
