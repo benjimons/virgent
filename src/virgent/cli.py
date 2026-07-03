@@ -306,6 +306,19 @@ def cmd_list(args) -> int:
     return 0
 
 
+def cmd_frameworks(args) -> int:
+    from .compliance.frameworks import CONTROLS, framework_size, frameworks
+    print(f"{len(CONTROLS)} controls across {len(frameworks())} frameworks:\n")
+    for fw in frameworks():
+        print(f"  {fw:18} {framework_size(fw):4} controls")
+    if args.framework:
+        print(f"\nControls for {args.framework}:")
+        for cid, meta in sorted(CONTROLS.items()):
+            if meta["framework"] == args.framework:
+                print(f"  {cid:24} {meta['title']}")
+    return 0
+
+
 def cmd_report(args) -> int:
     agent = _agent(args)
     rendered = agent.report(fmt=args.format)
@@ -351,6 +364,8 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("init", help="initialize workdir and default policy")
     sub.add_parser("list", help="list all ingestors, capabilities, and frameworks")
+    p_fw = sub.add_parser("frameworks", help="show the compliance control catalog")
+    p_fw.add_argument("--framework", help="list all controls for one framework")
 
     p_ingest = sub.add_parser("ingest", help="ingest a file, directory, or repo")
     p_ingest.add_argument("target")
@@ -446,6 +461,7 @@ def main(argv: list[str] | None = None) -> int:
     handlers = {
         "init": cmd_init,
         "list": cmd_list,
+        "frameworks": cmd_frameworks,
         "ingest": cmd_ingest,
         "host": cmd_host,
         "runtime": cmd_runtime,

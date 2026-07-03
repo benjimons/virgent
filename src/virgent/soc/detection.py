@@ -17,6 +17,19 @@ from .models import Alert, BRUTE_CONTROLS, SOC_CONTROLS, alert_id
 SUSPICIOUS_SUDO = re.compile(
     r"(?i)(?:/tmp/|/dev/shm/|\bnc\b|\bncat\b|\bwget\b|\bcurl\b|bash\s+-i|/dev/tcp/|chmod\s+777|chattr)")
 
+# detection rule -> MITRE ATT&CK technique IDs
+RULE_ATTACK = {
+    "ssh-brute-force": ["ATTACK:T1110"],
+    "password-spray": ["ATTACK:T1110.003"],
+    "successful-login-after-bruteforce": ["ATTACK:T1110", "ATTACK:T1078"],
+    "sudo-suspicious-command": ["ATTACK:T1548.003", "ATTACK:T1059.004"],
+    "privileged-group-change": ["ATTACK:T1136", "ATTACK:T1098"],
+    "web-attack-sqli": ["ATTACK:T1190"],
+    "web-attack-path_traversal": ["ATTACK:T1190"],
+    "web-attack-xss": ["ATTACK:T1190"],
+    "web-attack-cmd_injection": ["ATTACK:T1190", "ATTACK:T1059"],
+}
+
 
 @dataclass
 class DetectionConfig:
@@ -122,5 +135,9 @@ class DetectionEngine:
                     ))
         for a in alerts:
             a.id = alert_id(a.rule, a.entities)
+            # attach MITRE ATT&CK technique controls for coverage/reporting
+            for technique in RULE_ATTACK.get(a.rule, []):
+                if technique not in a.controls:
+                    a.controls.append(technique)
         deduped = {a.id: a for a in alerts}
         return list(deduped.values())

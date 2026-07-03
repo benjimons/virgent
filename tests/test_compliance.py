@@ -1,6 +1,40 @@
-from virgent.compliance.frameworks import CONTROLS, controls_for, coverage, frameworks
+from virgent.compliance.frameworks import (
+    CONTROLS,
+    controls_for,
+    coverage,
+    csf_posture,
+    framework_size,
+    frameworks,
+)
 from virgent.compliance.report import generate_report
 from virgent.models import Finding, Severity
+
+
+def test_catalog_is_fully_populated():
+    # every major framework is present with its expected control count
+    expected = {
+        "NIST-CSF-2.0": 106, "ISO27001": 93, "SOC2": 51, "NIST-800-53": 51,
+        "CIS-Controls-v8": 18, "PCI-DSS-4.0": 12, "OWASP-Top10": 10,
+        "HIPAA": 13, "GDPR": 7, "MITRE-ATTACK": 34, "CIS": 6,
+    }
+    for fw, count in expected.items():
+        assert framework_size(fw) == count, f"{fw}: {framework_size(fw)} != {count}"
+    assert len(CONTROLS) >= 400
+
+
+def test_all_capability_referenced_controls_exist():
+    # controls used by capabilities must resolve in the catalog
+    for cid in ["SOC2:CC6.1", "ISO27001:A.8.24", "NIST:IA-5", "CIS:5.2",
+                "OWASP:A07", "NIST:CA-8", "NIST:SI-4", "NIST:IR-4"]:
+        assert cid in CONTROLS
+
+
+def test_csf_posture_maps_capabilities_to_functions():
+    posture = csf_posture(["secrets", "soc", "runtime", "fim"])
+    assert posture["DE"]["covered"] is True     # runtime/soc/fim -> Detect
+    assert posture["RS"]["covered"] is True     # soc/runtime -> Respond
+    assert "soc" in posture["RC"]["capabilities"]
+    assert set(posture) == {"GV", "ID", "PR", "DE", "RS", "RC"}
 
 
 def make_finding(i, controls):
