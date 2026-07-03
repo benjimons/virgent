@@ -1,0 +1,23 @@
+# Always-on Virgent monitor.
+#   VIRGENT_AUDIT_KEY=$(openssl rand -hex 32) docker compose -f deploy/docker-compose.yml up -d
+#   docker compose -f deploy/docker-compose.yml exec virgent virgent --workdir /var/lib/virgent decisions
+services:
+  virgent:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: virgent
+    restart: unless-stopped
+    # Inspect the host, not just the container:
+    pid: host
+    environment:
+      VIRGENT_AUDIT_KEY: ${VIRGENT_AUDIT_KEY:?set VIRGENT_AUDIT_KEY}
+    volumes:
+      # durable, ideally WORM-backed, agent state
+      - virgent-state:/var/lib/virgent
+      # host logs for SOC detection (read-only)
+      - /var/log:/host/var/log:ro
+    command: ["watch", "--interval", "60", "--log", "/host/var/log/auth.log"]
+
+volumes:
+  virgent-state:

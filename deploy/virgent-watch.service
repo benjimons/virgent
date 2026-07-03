@@ -1,0 +1,44 @@
+# Always-on Virgent monitor (host + runtime + logs + integrity + SOC).
+# Install: copy to /etc/systemd/system/, edit paths/logs, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now virgent-watch
+#
+# Runs as a dedicated low-privilege user. It observes and detects continuously;
+# it never takes a response action on its own — response is dry-run by default
+# and gated behind the access model (a human runs `virgent decide`).
+
+[Unit]
+Description=Virgent always-on security monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=virgent
+Group=virgent
+
+# Durable state (audit log, provenance, casebook, register). Put this on
+# append-only / WORM-backed storage in production.
+Environment=VIRGENT_WORKDIR=/var/lib/virgent
+# HMAC signing key for the audit chain — load from a secret manager, not here.
+# Environment=VIRGENT_AUDIT_KEY=...    (prefer EnvironmentFile below)
+EnvironmentFile=-/etc/virgent/virgent.env
+
+# Continuous cycle every 60s: host hardening drift, live-system IOCs, file
+# integrity, and SOC detection over the named logs. Add --log per source.
+ExecStart=/usr/local/bin/virgent --workdir ${VIRGENT_WORKDIR} watch \
+    --interval 60 \
+    --log /var/log/auth.log \
+    --log /var/log/syslog
+
+Restart=always
+RestartSec=10
+
+# Hardening (read-only host except its own state dir)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/virgent
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -142,3 +142,22 @@ def test_monitor_tick_dedup(tmp_path):
     ticks = [r for r in agent.audit.iter_records() if r["action"] == "monitor.tick"]
     assert len(ticks) == 2
     assert agent.verify_audit().ok
+
+
+def test_monitor_cycle_covers_logs_and_soc(tmp_path):
+    agent = SecurityAgent(workdir=tmp_path / "wd", actor=ACTOR)
+    agent.ingestors["runtime"] = fake_runtime_ingestor()
+    logf = tmp_path / "auth.log"
+    logf.write_text("\n".join(
+        f"Jan 10 10:0{i} h sshd[1]: Failed password for root from 10.0.0.9 port 5{i} ssh2"
+        for i in range(6)) + "\n")
+
+    cycle = agent.monitor_cycle(capabilities=["runtime"], log_sources=[str(logf)])
+    assert cycle["findings"]                       # runtime IOCs
+    assert cycle["incidents"]                       # SOC brute-force incident
+    assert any("brute" in " ".join(i.rules) for i in cycle["incidents"])
+
+    # a second cycle over the same state produces the same incident (dedup)
+    cycle2 = agent.monitor_cycle(capabilities=["runtime"], log_sources=[str(logf)])
+    assert {i.id for i in cycle["incidents"]} == {i.id for i in cycle2["incidents"]}
+    assert agent.verify_audit().ok

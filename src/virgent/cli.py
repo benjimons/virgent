@@ -105,23 +105,36 @@ def cmd_fim(args) -> int:
 def cmd_watch(args) -> int:
     import time
     agent = _agent(args)
-    seen: set[str] = set()
+    seen_findings: set[str] = set()
+    seen_incidents: set[str] = set()
     rounds = 0
+    caps = args.capability or ["host", "runtime"]
+    logs = args.log or []
     print(f"watching {agent.ingestors['runtime'].hostname} every {args.interval}s "
-          f"({'forever' if not args.rounds else str(args.rounds) + ' round(s)'}); Ctrl-C to stop")
+          f"(caps={','.join(caps)}"
+          + (f", logs={len(logs)}" if logs else "")
+          + f"; {'forever' if not args.rounds else str(args.rounds) + ' round(s)'}); Ctrl-C to stop")
     try:
         while True:
             rounds += 1
-            findings = agent.monitor_tick(capabilities=args.capability or ["host", "runtime"])
-            new = [f for f in findings if f.fingerprint not in seen]
-            for f in new:
-                seen.add(f.fingerprint)
-            ts = findings[0].created_at if findings else ""
-            if new:
-                print(f"\n[tick {rounds}] {len(new)} new finding(s):")
-                _print_findings(new)
+            cycle = agent.monitor_cycle(capabilities=caps, log_sources=logs)
+            new_f = [f for f in cycle["findings"] if f.fingerprint not in seen_findings]
+            for f in new_f:
+                seen_findings.add(f.fingerprint)
+            new_i = [i for i in cycle["incidents"]
+                     if i.id not in seen_incidents and i.status not in ("resolved",)]
+            for i in new_i:
+                seen_incidents.add(i.id)
+            if new_f or new_i:
+                print(f"\n[tick {rounds}] {len(new_f)} new finding(s), {len(new_i)} new incident(s):")
+                _print_findings(new_f)
+                for i in new_i:
+                    print(f"  INCIDENT [{i.priority}] {i.severity.value.upper()} {i.id}  {i.title}")
+                pend = agent.pending_decisions()
+                if pend:
+                    print(f"  {len(pend)} decision(s) awaiting a human: virgent decisions")
             else:
-                print(f"[tick {rounds}] no new findings (audit head {agent.audit.head_hash[:12]}…)")
+                print(f"[tick {rounds}] clear (audit head {agent.audit.head_hash[:12]}…)")
             if args.rounds and rounds >= args.rounds:
                 break
             if args.interval > 0:
@@ -461,6 +474,7 @@ def main(argv: list[str] | None = None) -> int:
     p_watch.add_argument("--interval", type=int, default=60, help="seconds between ticks (default 60)")
     p_watch.add_argument("--rounds", type=int, default=0, help="stop after N ticks (default: run forever)")
     p_watch.add_argument("--capability", action="append", help="capabilities to run each tick")
+    p_watch.add_argument("--log", action="append", help="log file to re-ingest + run SOC detection each tick (repeatable)")
 
     p_soc = sub.add_parser("soc", help="security operations: detect, triage, respond to incidents")
     soc_sub = p_soc.add_subparsers(dest="soc_command", required=True)

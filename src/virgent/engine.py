@@ -500,6 +500,31 @@ class SecurityAgent:
         })
         return findings
 
+    def monitor_cycle(
+        self,
+        capabilities: list[str] | None = None,
+        log_sources: list[str] | None = None,
+    ) -> dict:
+        """One full always-on monitoring cycle.
+
+        Covers live host/runtime/integrity state plus, if ``log_sources`` are
+        given, re-ingestion of those logs and a SOC detection pass. This is the
+        unit a long-running ``virgent watch`` service repeats forever. Returns
+        this cycle's findings and current incidents; alerts/incidents dedup by
+        stable identity, so repeating the cycle doesn't create duplicates.
+        """
+        caps = capabilities or ["host", "runtime"]
+        findings = self.monitor_tick(capabilities=caps)
+        incidents: list = []
+        if log_sources:
+            for src in log_sources:
+                try:
+                    self.ingest(src, ingestor="file")
+                except (FileNotFoundError, OSError):
+                    continue
+            _, incidents = self.soc_detect()
+        return {"findings": findings, "incidents": incidents}
+
     def load_findings(self, dedup: bool = True) -> list[Finding]:
         if not self.findings_path.exists():
             return []
