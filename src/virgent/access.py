@@ -96,6 +96,45 @@ DEFAULT_MIN_ROLE = {
 # risk score (0-100) at/above which the required role is bumped one rung
 RISK_ESCALATION_THRESHOLD = 80
 
+# Declarative sensitivity tier for every action the agent can take. Longest
+# matching prefix wins. This is the single place that classifies the
+# consequence of an action, so the autonomy model applies uniformly — humans
+# can be inserted at any decision point by tuning the autonomy for its tier.
+ACTION_SENSITIVITY: dict[str, Sensitivity] = {
+    "agent.init": Sensitivity.OBSERVE,
+    "ingest.": Sensitivity.OBSERVE,
+    "collect.host": Sensitivity.OBSERVE,
+    "collect.runtime": Sensitivity.OBSERVE,
+    "collect.web": Sensitivity.ENRICH,
+    "scan.": Sensitivity.OBSERVE,
+    "report.": Sensitivity.OBSERVE,
+    "audit.": Sensitivity.OBSERVE,
+    "fim.baseline": Sensitivity.OBSERVE,
+    "fim.check": Sensitivity.OBSERVE,
+    "monitor.": Sensitivity.OBSERVE,
+    "vulns.": Sensitivity.OBSERVE,
+    "soc.detect": Sensitivity.OBSERVE,
+    "soc.plan": Sensitivity.OBSERVE,
+    "soc.list": Sensitivity.OBSERVE,
+    "soc.triage": Sensitivity.ENRICH,
+    "llm.": Sensitivity.ENRICH,
+    "pentest.": Sensitivity.ACTIVE,
+    "remediate.": Sensitivity.RESPOND,
+    "respond.isolate_host": Sensitivity.DESTRUCTIVE,
+    "respond.quarantine_file": Sensitivity.RESPOND,
+    "respond.": Sensitivity.RESPOND,
+}
+
+
+def sensitivity_for(action: str) -> Sensitivity:
+    """Classify an action by its most specific matching prefix."""
+    best = ""
+    for prefix in ACTION_SENSITIVITY:
+        if action == prefix or action.startswith(prefix):
+            if len(prefix) > len(best):
+                best = prefix
+    return ACTION_SENSITIVITY.get(best, Sensitivity.RESPOND)
+
 
 class AutonomyPolicy:
     def __init__(self, roles: list[str] | None = None,

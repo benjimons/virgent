@@ -57,6 +57,27 @@ DEFAULT_POLICY: dict = {
         "redact_before_send": True,
         "max_input_chars": 400_000,
     },
+    # Graduated Autonomy with Escalation (see virgent.access). Every action is
+    # classified into a sensitivity tier; this block decides how much human
+    # oversight each tier gets and who may authorize it.
+    "access": {
+        "roles": ["agent", "analyst", "responder", "admin"],
+        "autonomy": {
+            "observe": "auto",          # read-only collection/analysis
+            "enrich": "auto",           # derive/correlate/allowlisted lookups
+            "active": "confirm",        # non-destructive active probing
+            "respond": "confirm",       # reversible changes to other systems
+            "destructive": "escalate",  # hard-to-reverse containment
+        },
+        "min_role": {
+            "observe": "agent",
+            "enrich": "agent",
+            "active": "analyst",
+            "respond": "responder",
+            "destructive": "admin",
+        },
+        "risk_threshold": 80,
+    },
 }
 
 

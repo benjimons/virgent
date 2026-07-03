@@ -121,9 +121,54 @@ def check_kubernetes(content: str) -> list[dict]:
     return issues
 
 
+def check_terraform(content: str) -> list[dict]:
+    issues = []
+    for m in re.finditer(r'(?i)cidr_blocks\s*=\s*\[[^\]]*"0\.0\.0\.0/0"', content):
+        issues.append({
+            "rule": "tf-open-ingress",
+            "title": "Security group allows ingress from 0.0.0.0/0",
+            "severity": Severity.HIGH,
+            "line": _line_of(content, m.start()),
+            "controls": ["SOC2:CC6.6", "NIST:SC-7", "CIS:4.4", "OWASP:A05", "PCI:1"],
+            "remediation": "Restrict ingress CIDRs to known networks; never expose management ports to the internet.",
+        })
+    for m in re.finditer(r'(?i)acl\s*=\s*"public-read(?:-write)?"', content):
+        issues.append({
+            "rule": "tf-public-bucket",
+            "title": "Object storage bucket has a public ACL",
+            "severity": Severity.HIGH,
+            "line": _line_of(content, m.start()),
+            "controls": ["SOC2:CC6.1", "NIST:AC-3", "ISO27001:A.5.15", "OWASP:A01"],
+            "remediation": "Make the bucket private and use signed URLs or explicit policies for access.",
+        })
+    for m in re.finditer(r'(?i)(?:password|secret|token|access_key)\s*=\s*"[^"$][^"]{6,}"', content):
+        value = m.group(0)
+        if "var." in value or "${" in value:
+            continue
+        issues.append({
+            "rule": "tf-hardcoded-secret",
+            "title": "Hardcoded secret in Terraform",
+            "severity": Severity.HIGH,
+            "line": _line_of(content, m.start()),
+            "controls": ["SOC2:CC6.1", "NIST:IA-5", "ISO27001:A.8.24", "OWASP:A07"],
+            "remediation": "Move secrets to a secret manager or injected variables; never commit them.",
+        })
+    if re.search(r"(?i)\bresource\s+\"aws_s3_bucket\"", content) and \
+            not re.search(r"(?i)server_side_encryption", content):
+        issues.append({
+            "rule": "tf-unencrypted-storage",
+            "title": "S3 bucket without server-side encryption configured",
+            "severity": Severity.MEDIUM,
+            "line": 1,
+            "controls": ["SOC2:CC6.1", "NIST:SC-28", "ISO27001:A.8.24", "OWASP:A02", "PCI:3"],
+            "remediation": "Enable default server-side encryption on the bucket.",
+        })
+    return issues
+
+
 class IaCCapability(Capability):
     name = "iac"
-    description = "Detect misconfigurations in Dockerfiles, CI workflows, and Kubernetes manifests"
+    description = "Detect misconfigurations in Dockerfiles, CI workflows, Kubernetes, and Terraform"
 
     def analyze(self, evidence: Iterable[Evidence]) -> list[Finding]:
         findings: list[Finding] = []
@@ -134,6 +179,8 @@ class IaCCapability(Capability):
             issues: list[dict] = []
             if "dockerfile" in filename:
                 issues = check_dockerfile(ev.content)
+            elif filename.endswith(".tf"):
+                issues = check_terraform(ev.content)
             elif filename.endswith((".yml", ".yaml")):
                 if "/.github/workflows/" in source_lower or ".github/workflows" in source_lower:
                     issues = check_github_actions(ev.content)
