@@ -176,6 +176,70 @@ def cmd_vulns(args) -> int:
     return 2
 
 
+def cmd_soc(args) -> int:
+    from .access import EscalationRequired
+    agent = _agent(args, with_provider=getattr(args, "llm", False))
+    if args.soc_command == "detect":
+        alerts, incidents = agent.soc_detect()
+        print(f"{len(alerts)} alert(s), {len(incidents)} incident(s):")
+        for inc in incidents:
+            print(f"  [{inc.priority}] {inc.severity.value.upper():8} {inc.id}  "
+                  f"{inc.title}  entities={inc.entities}")
+        return 0
+    if args.soc_command == "list":
+        for inc in agent.soc.casebook.all_incidents():
+            print(f"[{inc.priority}] {inc.status:10} {inc.severity.value.upper():8} "
+                  f"{inc.id}  {inc.title}")
+        return 0
+    if args.soc_command == "show":
+        inc = agent.soc.casebook.get_incident(args.incident)
+        print(json.dumps(inc.to_dict(), indent=2, default=str))
+        return 0
+    if args.soc_command == "triage":
+        inc = agent.soc_triage(args.incident)
+        print(f"{inc.id} -> {inc.status} ({inc.priority})")
+        print(inc.summary)
+        return 0
+    if args.soc_command == "plan":
+        for step in agent.soc_plan(args.incident):
+            print(f"  {step['action']:16} [{step['sensitivity']}]  {step['description']}  {step['params']}")
+        return 0
+    if args.soc_command == "respond":
+        try:
+            entry = agent.soc_respond(args.incident, args.action)
+            print(f"{args.action}: {entry['result'].get('status')} — {entry['result'].get('detail', '')}")
+            return 0
+        except EscalationRequired as e:
+            req = e.request
+            print(f"human decision required: {req.id}")
+            print(f"  action={req.action} sensitivity={req.sensitivity} "
+                  f"needs role >= {req.required_role}")
+            print(f"  resolve with: virgent decide {req.id} approve --role {req.required_role}")
+            return 4
+    return 2
+
+
+def cmd_decisions(args) -> int:
+    agent = _agent(args)
+    pending = agent.pending_decisions()
+    for r in pending:
+        print(f"{r['id']}  {r['action']}  sensitivity={r['sensitivity']}  "
+              f"needs>={r['required_role']}  ctx={r.get('context', {})}")
+    print(f"\n{len(pending)} pending decision(s).")
+    return 0
+
+
+def cmd_decide(args) -> int:
+    agent = _agent(args)
+    resolver = f"cli:{getpass.getuser()}"
+    result = agent.resolve_decision(args.decision_id, args.decision,
+                                    resolver=resolver, role=args.role, note=args.note or "")
+    print(f"{args.decision_id} -> {result['status']}"
+          + (f" (escalated: role '{args.role}' below required '{result['required_role']}')"
+             if result["status"] == "pending" else ""))
+    return 0
+
+
 def cmd_scan(args) -> int:
     agent = _agent(args, with_provider=args.llm)
     for pattern in args.approve or []:
@@ -309,6 +373,30 @@ def main(argv: list[str] | None = None) -> int:
     p_watch.add_argument("--rounds", type=int, default=0, help="stop after N ticks (default: run forever)")
     p_watch.add_argument("--capability", action="append", help="capabilities to run each tick")
 
+    p_soc = sub.add_parser("soc", help="security operations: detect, triage, respond to incidents")
+    soc_sub = p_soc.add_subparsers(dest="soc_command", required=True)
+    p_sd = soc_sub.add_parser("detect", help="run detection + correlation over ingested logs")
+    p_sd.add_argument("--llm", action="store_true", help="enable LLM-assisted triage later")
+    soc_sub.add_parser("list", help="list incidents")
+    p_ss = soc_sub.add_parser("show", help="show an incident")
+    p_ss.add_argument("incident")
+    p_st = soc_sub.add_parser("triage", help="triage an incident (LLM if --llm and key set)")
+    p_st.add_argument("incident")
+    p_st.add_argument("--llm", action="store_true")
+    p_sp = soc_sub.add_parser("plan", help="show the recommended response plan for an incident")
+    p_sp.add_argument("incident")
+    p_sr = soc_sub.add_parser("respond", help="execute a response action (autonomy/approval gated)")
+    p_sr.add_argument("incident")
+    p_sr.add_argument("--action", required=True)
+
+    p_dec = sub.add_parser("decisions", help="list pending human decisions")
+
+    p_decide = sub.add_parser("decide", help="approve/deny a pending decision (human-in-the-loop)")
+    p_decide.add_argument("decision_id")
+    p_decide.add_argument("decision", choices=["approve", "deny"])
+    p_decide.add_argument("--role", default="responder", help="your role in the access chain")
+    p_decide.add_argument("--note", default="")
+
     p_pentest = sub.add_parser("pentest", help="authorized, non-destructive active probing (scope-gated)")
     p_pentest.add_argument("target", nargs="+", help="host or host:port,port (must be in policy pentest.scope)")
     p_pentest.add_argument("--authorize", action="store_true",
@@ -365,6 +453,9 @@ def main(argv: list[str] | None = None) -> int:
         "watch": cmd_watch,
         "pentest": cmd_pentest,
         "vulns": cmd_vulns,
+        "soc": cmd_soc,
+        "decisions": cmd_decisions,
+        "decide": cmd_decide,
         "scan": cmd_scan,
         "assess": cmd_assess,
         "report": cmd_report,

@@ -37,10 +37,19 @@ from .ingest import (
     WebCollector,
     query_osv,
 )
+from .access import (
+    Autonomy,
+    AutonomyPolicy,
+    DecisionBroker,
+    EscalationRequired,
+    Sensitivity,
+)
 from .ingest.runtime import RuntimeIngestor
 from .integrity import IntegrityMonitor
 from .pentest import PenTester
 from .policy import PolicyDecision
+from .soc import SOC
+from .soc.response import ACTIONS as RESPONSE_ACTIONS
 from .vulnmgmt import VulnerabilityRegister
 from .llm.provider import LLMResult, ReasoningProvider
 from .models import Actor, Evidence, Finding
@@ -96,6 +105,16 @@ class SecurityAgent:
         self.integrity = IntegrityMonitor(self.workdir / "fim_baseline.json")
         self.vulns = VulnerabilityRegister(self.workdir / "vuln_register.json")
         self.pentest_prober = None  # inject a Prober for tests/dry-runs
+
+        # access & autonomy model (Graduated Autonomy with Escalation)
+        self.autonomy = AutonomyPolicy.from_policy(self.policy.policy)
+        self.broker = DecisionBroker(
+            self.workdir / "decisions.json", self.autonomy, audit=self.audit.record)
+
+        # SOC
+        soc_reason = self.reason if self.provider is not None else None
+        self.soc = SOC(self.workdir / "soc", reason=soc_reason)
+        self.response_executor = None  # inject a ResponseExecutor; default is dry-run
 
         self.audit.record("agent.init", params={
             "version": __version__,
@@ -329,6 +348,100 @@ class SecurityAgent:
             "fingerprint": fingerprint, "status": status, "note": note,
         })
         return entry.to_dict()
+
+    # -- SOC: detect / triage / respond ---------------------------------------
+
+    def soc_detect(self) -> tuple[list, list]:
+        """Run detection + correlation over ingested log evidence (audited)."""
+        self._enforce("soc.detect")
+        evidence = [e for e in self.load_evidence()
+                    if e.kind in ("log", "data", "event", "text")]
+        alerts, incidents = self.soc.process_evidence(evidence)
+        self.audit.record("soc.detect", params={
+            "evidence": len(evidence),
+            "alerts": len(alerts),
+            "incidents": len(incidents),
+            "incident_ids": [i.id for i in incidents],
+        })
+        return alerts, incidents
+
+    def soc_triage(self, incident_id: str):
+        self._enforce("soc.triage", {"incident": incident_id})
+        inc = self.soc.triage(incident_id)
+        self.audit.record("soc.triage", params={
+            "incident": incident_id, "status": inc.status, "priority": inc.priority,
+        })
+        return inc
+
+    def soc_plan(self, incident_id: str) -> list[dict]:
+        self._enforce("soc.plan", {"incident": incident_id})
+        return self.soc.plan(incident_id)
+
+    def soc_respond(self, incident_id: str, action: str):
+        """Execute a response action under the Graduated Autonomy model.
+
+        AUTO/NOTIFY tiers (or a standing approval) execute immediately;
+        CONFIRM/ESCALATE tiers with no approval open a human decision and
+        raise :class:`EscalationRequired`; DENY refuses.
+        """
+        incident = self.soc.casebook.get_incident(incident_id)
+        _desc, sensitivity = RESPONSE_ACTIONS.get(action, (action, Sensitivity.RESPOND))
+        from .vulnmgmt import _SEVERITY_SCORE
+        context = {
+            "incident": incident_id,
+            "action": action,
+            "severity": incident.severity.value,
+            "risk": _SEVERITY_SCORE.get(incident.severity, 45),
+            "entities": incident.entities,
+        }
+        level, required_role = self.autonomy.evaluate(sensitivity, context)
+        action_name = f"respond.{action}"
+
+        if level == Autonomy.DENY:
+            self.audit.record(action_name, params=context, outcome="denied:autonomy",
+                             detail="autonomy policy denies this action")
+            raise PolicyViolation(PolicyDecision(
+                action_name, "deny", "access.autonomy", "denied by autonomy policy"))
+
+        # a persisted, approved (and not-yet-used) decision authorizes the
+        # action across processes — the human's approval is the grant
+        approved_decision = self.broker.approved_for(action_name, incident_id)
+        standing = self.policy.evaluate(action_name)
+        standing_approval = standing.allowed and standing.rule != "default"
+
+        if level in (Autonomy.AUTO, Autonomy.NOTIFY) or approved_decision or standing_approval:
+            entry = self.soc.execute_action(incident_id, action, self.response_executor)
+            if approved_decision:
+                self.broker.mark_consumed(approved_decision.id)
+            self.audit.record(action_name, params={
+                "incident": incident_id, "action": action,
+                "autonomy": level.value,
+                "authorized_by": approved_decision.resolved_by if approved_decision
+                else ("standing_approval" if standing_approval else "autonomy"),
+                "result": entry["result"].get("status"),
+            })
+            return entry
+
+        # needs a human decision
+        req = self.broker.open(action_name, sensitivity, context, required_role, level)
+        raise EscalationRequired(req)
+
+    # -- human-in-the-loop decisions ------------------------------------------
+
+    def resolve_decision(self, decision_id: str, decision: str, resolver: str,
+                         role: str, note: str = "") -> dict:
+        """Record a human's approve/deny (or escalate on insufficient role)."""
+        req = self.broker.resolve(decision_id, decision, resolver, role, note=note)
+        if req.status == "approved":
+            # grant the standing approval so the action can now proceed
+            self.policy.grant_approval(req.action, Actor(id=resolver, type="human"))
+            self.audit.record("policy.approval", params={
+                "pattern": req.action, "via_decision": decision_id, "role": role,
+            }, actor=Actor(id=resolver, type="human"))
+        return req.to_dict()
+
+    def pending_decisions(self) -> list[dict]:
+        return [r.to_dict() for r in self.broker.pending()]
 
     # -- continuous monitoring ------------------------------------------------
 
