@@ -13,6 +13,8 @@ Virgent is designed to run inside enterprise product-development environments an
 | Least privilege | Deny-by-default action policy, attributed approvals, domain allowlists | Policy is only as strong as its configuration; review changes to `policy.yaml` like code |
 | Data-loss prevention | Pattern-based redaction before LLM egress, audit params, and reports | Pattern-based DLP is best-effort; novel secret formats may pass. Entropy heuristics reduce, not eliminate, misses |
 | Prompt injection | Evidence fenced in prompts; model output parsed defensively, capped, and marked lower-confidence; model can only produce findings, never actions | LLM findings should be human-reviewed; the model has no tool access through this framework |
+| Authorized action / human oversight | Graduated Autonomy with Escalation: sensitivity tiers → autonomy levels → role chain; response actions dry-run by default and gated behind a persisted, replay-protected human decision | Autonomy config is policy — review it like code; a mis-set tier lowers oversight |
+| Authorized pen testing | `pentest.*` requires both an approval and a policy `pentest.scope` allowlist match (host / `.suffix` / CIDR); probes are non-destructive and non-exploitative | Only add hosts you are authorized to test to the scope; the scope is the authorization boundary |
 
 ## Deployment recommendations
 

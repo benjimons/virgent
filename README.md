@@ -1,109 +1,131 @@
 # Virgent
 
-**An auditable, provenance-first security agent framework for enterprise product-development environments.**
+**An auditable, provenance-first security agent — a whole security organization in one tool.**
 
-Virgent is a Python framework and CLI for running security analysis — code and pipeline scanning, dependency/supply-chain auditing, investigation, and compliance evidence gathering — where **every action is provable after the fact**:
+Virgent is a Python framework and CLI that runs an entire security program: it
+reviews code and infrastructure, inspects and monitors live systems, runs
+authorized penetration tests, operates a full detect-triage-respond SOC,
+manages vulnerabilities through their lifecycle, and maps everything to the
+major compliance frameworks — all on a substrate where **every action is
+policy-gated, provenance-stamped, and recorded in a tamper-evident audit
+log**, and where **humans can intervene at any decision point**.
 
-- **Tamper-evident audit log.** Every action the agent takes (ingestion, policy decisions, scans, LLM calls, report generation) is appended to a SHA-256 hash-chained JSONL log, optionally HMAC-signed with a key held outside the log (`VIRGENT_AUDIT_KEY`). Editing, deleting, or reordering any record is detectable with `virgent audit verify`.
-- **Provenance for everything.** Every piece of information the agent consumes gets a provenance record: source, collection method, collector identity, timestamp, SHA-256 of the exact bytes, and derivation lineage (W3C-PROV-style). Findings reference evidence IDs; evidence content is stored content-addressed so any hash can be re-verified.
-- **Deny-by-default policy engine.** Actions are evaluated against a YAML policy (`allow` / `deny` / `require_approval` with glob patterns). Human approvals are explicit, attributed to an approver, and audited. Network access is domain-allowlisted.
-- **Data-loss prevention.** Secrets are redacted before anything crosses a trust boundary — LLM prompts, audit parameters, and reports never contain raw credentials.
-- **Pluggable reasoning layer.** The Claude API (via the official `anthropic` SDK) is the default reasoning engine behind a small `ReasoningProvider` interface, so it can be swapped for Bedrock/Vertex clients or a deterministic mock for air-gapped audit runs. Every model call is policy-gated, redacted, and audited with prompt/response hashes and token usage.
-- **Compliance mapping.** Findings carry control IDs mapped to SOC 2, ISO/IEC 27001:2022, NIST SP 800-53, and OWASP Top 10; reports include a per-framework coverage matrix and an audit-chain attestation.
+It is designed for enterprise product-development environments where you have
+to *prove* what the agent did, why, and on whose authority.
+
+## What makes it different
+
+- **Tamper-evident audit log.** Every action (ingestion, policy decisions,
+  scans, LLM calls, responses, human approvals) is appended to a SHA-256
+  hash-chained JSONL log, optionally HMAC-signed with a key held outside the
+  log. `virgent audit verify` detects any edited, deleted, or reordered
+  record.
+- **Provenance for everything.** Every piece of information the agent consumes
+  gets a provenance record — source, method, collector, timestamp, content
+  SHA-256, and derivation lineage. Findings reference evidence IDs; content is
+  stored content-addressed so any hash can be re-verified independently.
+- **Deny-by-default policy + Graduated Autonomy.** Actions are classified into
+  sensitivity tiers (observe → enrich → active → respond → destructive); a
+  policy maps each tier to an autonomy level (auto / notify / confirm /
+  escalate / deny) and a required role on a chain (agent < analyst <
+  responder < admin). A human decision queue lets people approve, deny, or be
+  escalated to — and an approval in one process authorizes the action in
+  another, once, with replay protection.
+- **Data-loss prevention.** Secrets are redacted before anything crosses a
+  trust boundary — LLM prompts, audit parameters, and reports never contain
+  raw credentials.
+- **Pluggable reasoning.** The Claude API (official `anthropic` SDK, adaptive
+  thinking) is the default reasoning engine behind a small `ReasoningProvider`
+  interface — swappable for Bedrock/Vertex or a deterministic mock for
+  air-gapped audit runs. Every model call is policy-gated, redacted, and
+  audited with prompt/response hashes.
+- **Full compliance coverage.** 400+ controls across 11 frameworks: NIST CSF
+  2.0, NIST 800-53, ISO/IEC 27001:2022, SOC 2, CIS Controls v8, CIS
+  Benchmarks, PCI DSS 4.0, HIPAA, GDPR, OWASP Top 10, and MITRE ATT&CK.
 
 ## Install
 
 ```bash
-pip install -e .          # core (offline capabilities)
+pip install -e .          # core (all offline capabilities)
 pip install -e '.[llm]'   # + Claude-backed reasoning
 ```
 
 ## Quick start
 
 ```bash
-export VIRGENT_AUDIT_KEY="$(openssl rand -hex 32)"   # enables HMAC-signed audit records
+export VIRGENT_AUDIT_KEY="$(openssl rand -hex 32)"   # HMAC-signed audit records
 
-virgent init                          # creates .virgent/ with a default policy
-virgent list                          # show every ingestor, capability, and framework
-virgent ingest ./my-repo --git-history
-virgent host --scan                   # read-only host hardening inspection
-virgent scan                          # secrets, dependency, IaC, host capabilities (offline)
-virgent scan --online --approve collect.web   # + OSV vulnerability lookups (audited approval)
-virgent scan --llm                    # + Claude-assisted code review (needs ANTHROPIC_API_KEY)
-virgent report -o report.md           # auditor-ready report with attestation
-virgent audit verify                  # exit 0 iff the chain is intact
+virgent init                       # workdir + default policy
+virgent list                       # every ingestor, capability, framework
+virgent assess ./my-repo --host --runtime --git-history -o report.md
+virgent posture                    # security-program posture (CSF + live state)
+virgent audit verify               # exit 0 iff the chain is intact
 ```
 
-Or run the whole thing in one shot — ingest a repo (and its git history), inspect
-the host, scan with every capability, and emit an attested report:
+## The capabilities
 
-```bash
-virgent assess ./my-repo --host --git-history --online --llm \
-    --approve collect.web -o report.md
-```
-
-Ask the (audited, redacted) reasoning layer a question:
-
-```bash
-virgent ask "Summarize the riskiest findings in the last scan and what to fix first"
-```
-
-## Architecture
-
-```
-                       ┌────────────────────────────────────────────┐
-   sources             │              SecurityAgent (engine)        │        outputs
-                       │                                            │
- files/dirs ──┐        │  policy check ──► audit record (always)    │   ┌─► findings.jsonl
- git history ─┼─ ingest ─► provenance register (hash + lineage)     │   ├─► auditor report
- web feeds  ──┘        │        │                                   │   │   (md / json)
- (allowlisted,         │        ▼                                   │   └─► audit attestation
-  approval-gated)      │  capabilities: secrets │ deps │ iac │ llm  │
-                       │        │                                   │
-                       │        ▼            ReasoningProvider      │
-                       │  redact ─► llm.complete ─► hash + usage    │
-                       └────────────────────────────────────────────┘
-        .virgent/: audit.jsonl (hash chain) · provenance.jsonl · evidence/ · policy.yaml
-```
-
-Key invariants, enforced by the engine (the single choke point):
-
-1. No action executes without a policy decision, and the decision — including denials and approvals — is audited.
-2. No capability sees data that wasn't first registered with the provenance store.
-3. No content reaches a model or a persisted artifact without redaction.
-4. Every finding is traceable: finding → evidence IDs → provenance records → content hashes → audit records of collection.
-
-## Capabilities
-
-| Capability | What it does | Network |
+| Area | Command | What it does |
 |---|---|---|
-| `secrets` | Hardcoded credentials, tokens, private keys (with line numbers, redacted excerpts) in code, configs, and git history | none |
-| `dependencies` | Dependency inventory, unpinned-spec detection; known-vulnerability lookup against [OSV](https://osv.dev) when explicitly approved | optional |
-| `iac` | Dockerfile, GitHub Actions, and Kubernetes misconfigurations (root containers, `pull_request_target` + checkout, unpinned actions, echoed secrets, privileged pods, …) | none |
-| `llm-review` | Claude-assisted vulnerability review; model output treated as untrusted (fenced prompts, defensive parsing, `medium` confidence) | Claude API |
+| **Code & pipeline** | `scan` | Secrets (code, config, git history), dependency/OSV supply-chain audit, IaC misconfig (Dockerfile, GitHub Actions, Kubernetes, Terraform), LLM-assisted code review |
+| **Host** | `host --scan` | Read-only CIS-style hardening: SSH, accounts, kernel/sysctl, firewall, exposed services, file permissions |
+| **Live systems** | `runtime --scan` | Processes, connections, sessions, services → reverse-shell/staging/exposed-service indicators (ATT&CK-mapped) |
+| **Integrity** | `fim baseline`/`check` | Signed file-integrity baseline and change detection |
+| **Continuous** | `watch` | Re-scan live state on an interval; alert only on *new* findings |
+| **Pen testing** | `pentest` | Authorized, scope-gated, non-destructive active probing (open ports, HTTP headers, exposed paths, weak TLS) |
+| **Vuln management** | `vulns` | Dedup + risk-score findings; lifecycle (open/ack/resolved/accepted); SLA/overdue |
+| **SOC** | `soc detect/triage/plan/respond` | Log normalization → detection → correlation into incidents → LLM triage → approval-gated response playbooks |
+| **Org & program** | `org`, `posture`, `frameworks` | The security organization, runbooks, and program-posture/maturity view |
 
-Add your own by subclassing `virgent.capabilities.Capability` and calling `agent.register_capability(...)` — findings automatically inherit the provenance/audit/report machinery.
+## The agentic SOC
 
-## Policy
-
-`.virgent/policy.yaml` (created by `virgent init`):
-
-```yaml
-version: 1
-actions:
-  default: deny
-  allow: [agent.init, ingest.*, scan.*, report.*, audit.*, llm.complete]
-  require_approval: [collect.web, remediate.*]
-  deny: []
-network:
-  allowed_domains: [api.osv.dev]
-llm:
-  enabled: true
-  redact_before_send: true
-  max_input_chars: 400000
+```bash
+virgent ingest /var/log/auth.log
+virgent soc detect                 # normalize -> detect -> correlate into incidents
+virgent soc triage inc-abc123      # auto or LLM-assisted
+virgent soc plan inc-abc123        # recommended response playbook
+virgent soc respond inc-abc123 --action block_ip
+# -> if the tier needs a human, it escalates:
+virgent decisions                  # see pending human decisions
+virgent decide dec-xyz approve --role admin
+virgent soc respond inc-abc123 --action block_ip   # now executes (dry-run by default)
 ```
 
-Approvals are per-run and attributed: `virgent scan --online --approve collect.web` records a `policy.approval` audit event naming the human who granted it.
+Detection covers SSH brute force, password spray, successful-login-after-
+bruteforce (suspected compromise), suspicious sudo, privileged group changes,
+and web attacks (SQLi / traversal / XSS / command injection) — each mapped to
+MITRE ATT&CK techniques. Alerts sharing an entity (IP / user / host) correlate
+into incidents with stable IDs, so human triage state survives re-runs.
+
+## The access model — Graduated Autonomy with Escalation
+
+Every action carries a **sensitivity tier**. Policy maps each tier to an
+**autonomy level** and a **minimum role**:
+
+| Tier | Example | Default autonomy | Min role |
+|---|---|---|---|
+| observe | read a log, scan code | auto | agent |
+| enrich | LLM triage, OSV lookup | auto | agent |
+| active | port probe | confirm | analyst |
+| respond | block IP, disable user | confirm | responder |
+| destructive | isolate host | escalate | admin |
+
+High **risk** bumps the required role up the chain (a CRITICAL incident's
+`block_ip` needs an admin). When a human is required, Virgent opens a
+**decision** — a person approves/denies via `virgent decide`; a too-junior
+approver escalates it further rather than resolving it. Approvals persist and
+are consumed once. Everything is audited. See [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Compliance
+
+```bash
+virgent frameworks                        # 401 controls across 11 frameworks
+virgent frameworks --framework NIST-CSF-2.0
+```
+
+Findings carry control IDs; reports include a per-framework coverage matrix and
+an audit-chain attestation, so an auditor holding the workdir can re-verify
+every claim. `virgent posture` maps active capabilities onto the six NIST CSF
+2.0 functions and produces a maturity score.
 
 ## Using it as a library
 
@@ -111,32 +133,31 @@ Approvals are per-run and attributed: `virgent scan --online --approve collect.w
 from virgent import SecurityAgent, Actor
 from virgent.llm import AnthropicProvider
 
-agent = SecurityAgent(
-    workdir=".virgent",
-    actor=Actor(id="ci-pipeline", type="system"),
-    provider=AnthropicProvider(),          # or MockProvider() for air-gapped runs
-)
+agent = SecurityAgent(actor=Actor(id="ci", type="system"), provider=AnthropicProvider())
 agent.ingest("path/to/repo")
+agent.ingest("localhost", ingestor="host")
 findings = agent.scan()
-print(agent.report(fmt="markdown"))
+agent.sync_vulns()
+print(agent.report())
+print(agent.program_posture())
 assert agent.verify_audit().ok
 ```
 
-## Verifying an audit trail (for auditors)
+## Safety & authorization
 
-Given a `.virgent/` workdir and the HMAC key:
-
-```bash
-VIRGENT_AUDIT_KEY=<key> virgent --workdir .virgent audit verify
-```
-
-This recomputes every record hash, checks chain continuity and sequence numbers, and validates HMAC signatures. Any modified, deleted, or reordered record is reported with its sequence number. Evidence content can be independently re-hashed against `provenance.jsonl`.
+Virgent is built for **authorized** defensive use. Penetration testing is
+off unless you both grant an approval *and* list the target in the policy
+`pentest.scope`; response actions are dry-run by default and gated behind
+human approval; the agent's reasoning layer has no tool access and its output
+is treated as untrusted. See [SECURITY.md](SECURITY.md) for the threat model.
 
 ## Development
 
 ```bash
 pip install -e '.[dev]'
-pytest
+pytest          # 113 tests
 ```
 
-See [SECURITY.md](SECURITY.md) for the threat model and reporting instructions.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — how the pieces fit and the invariants
+- [CONTINUATION.md](CONTINUATION.md) — full handoff notes for resuming work
+- [SECURITY.md](SECURITY.md) — threat model and reporting

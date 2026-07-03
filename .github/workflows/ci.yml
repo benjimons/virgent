@@ -23,12 +23,21 @@ jobs:
         run: pip install -e '.[dev]'
       - name: Test
         run: pytest -v
-      - name: Smoke-test CLI (offline, tamper-evidence)
+      - name: Smoke-test CLI (offline, tamper-evidence, full surface)
         run: |
           export VIRGENT_AUDIT_KEY=ci-smoke-key
           mkdir -p /tmp/demo && printf 'FROM ubuntu:latest\n' > /tmp/demo/Dockerfile
+          printf 'Jan 10 10:00 h sshd[1]: Failed password for root from 10.0.0.9 port 51 ssh2\n%.0s' {1..6} > /tmp/demo/auth.log
           virgent --workdir /tmp/wd init
+          virgent --workdir /tmp/wd list
+          virgent --workdir /tmp/wd frameworks
+          virgent --workdir /tmp/wd org overview
           virgent --workdir /tmp/wd ingest /tmp/demo
           virgent --workdir /tmp/wd scan
+          virgent --workdir /tmp/wd host --scan
+          virgent --workdir /tmp/wd runtime --scan
+          virgent --workdir /tmp/wd soc detect
+          virgent --workdir /tmp/wd vulns sync
+          virgent --workdir /tmp/wd posture
           virgent --workdir /tmp/wd report --format json -o /tmp/report.json
           virgent --workdir /tmp/wd audit verify
