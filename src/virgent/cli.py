@@ -453,6 +453,43 @@ def cmd_frameworks(args) -> int:
     return 0
 
 
+def cmd_serve(args) -> int:
+    from virgent.api import serve
+    agent = _agent(args)
+    api_cfg = agent.policy.policy.get("api") or {}
+    token = args.token or api_cfg.get("token")
+    if not token:
+        print("error: set an API token (--token, policy api.token, or VIRGENT_API_TOKEN)",
+              file=sys.stderr)
+        return 1
+    serve(agent, host=args.host or api_cfg.get("host", "127.0.0.1"),
+          port=args.port or api_cfg.get("port", 8787), token=token)
+    return 0
+
+
+def cmd_query(args) -> int:
+    agent = _agent(args)
+    agent.reindex()
+    if args.what == "incidents":
+        rows = agent.store.query_incidents(status=args.status, limit=args.limit)
+    else:
+        rows = agent.store.query_findings(severity=args.severity,
+                                          capability=args.capability, limit=args.limit)
+    for r in rows:
+        print("  " + "  ".join(f"{k}={v}" for k, v in r.items()
+                               if k in ("id", "severity", "capability", "status", "title", "location")))
+    print(f"\n{len(rows)} row(s).  counts: {agent.store.counts()}")
+    return 0
+
+
+def cmd_ticket(args) -> int:
+    agent = _agent(args)
+    result = agent.open_ticket(incident_id=args.incident, finding_fingerprint=args.finding)
+    print(f"ticket {result.get('ticket_id', '?')} -> {result.get('status')} "
+          f"({result.get('connector')})")
+    return 0 if result.get("status") == "created" else 1
+
+
 def cmd_sbom(args) -> int:
     agent = _agent(args)
     bom = agent.generate_sbom(name=args.name, output=args.output)
@@ -697,6 +734,22 @@ def main(argv: list[str] | None = None) -> int:
     p_assess.add_argument("--format", choices=["markdown", "json"], default="markdown")
     p_assess.add_argument("-o", "--output", default=None, help="write the report to a file")
 
+    p_serve = sub.add_parser("serve", help="run the HTTP API + console (bearer-token, localhost)")
+    p_serve.add_argument("--host", default=None)
+    p_serve.add_argument("--port", type=int, default=None)
+    p_serve.add_argument("--token", default=None, help="API bearer token (or set VIRGENT_API_TOKEN)")
+
+    p_query = sub.add_parser("query", help="query the indexed findings/incidents")
+    p_query.add_argument("what", nargs="?", choices=["findings", "incidents"], default="findings")
+    p_query.add_argument("--severity", default=None)
+    p_query.add_argument("--capability", default=None)
+    p_query.add_argument("--status", default=None)
+    p_query.add_argument("--limit", type=int, default=50)
+
+    p_ticket = sub.add_parser("ticket", help="open a ticket for an incident or finding")
+    p_ticket.add_argument("--incident", default=None)
+    p_ticket.add_argument("--finding", default=None, help="finding fingerprint")
+
     p_sbom = sub.add_parser("sbom", help="generate a CycloneDX SBOM from ingested dependency manifests")
     p_sbom.add_argument("--name", default="virgent-target")
     p_sbom.add_argument("-o", "--output", default=None)
@@ -752,6 +805,9 @@ def main(argv: list[str] | None = None) -> int:
         "scan": cmd_scan,
         "assess": cmd_assess,
         "identity": cmd_identity,
+        "serve": cmd_serve,
+        "query": cmd_query,
+        "ticket": cmd_ticket,
         "sbom": cmd_sbom,
         "sign": cmd_sign,
         "ciem": cmd_ciem,

@@ -39,6 +39,8 @@ DEFAULT_POLICY: dict = {
             "attackpath.*",
             "sbom.*",
             "sign.*",
+            "store.*",
+            "ticket.*",
             "identity.reviews",
             "monitor.*",
             "vulns.*",
@@ -88,6 +90,21 @@ DEFAULT_POLICY: dict = {
     },
     # Also allow the read-only 'identity.reviews' generation:
     # (access-review generation is allowed by default; see actions.allow)
+    # HTTP API/console: bearer-token auth, localhost by default. No token = off.
+    "api": {
+        "token": "",           # set a strong token (or VIRGENT_API_TOKEN) to enable
+        "host": "127.0.0.1",
+        "port": 8787,
+    },
+    # Ticketing/workflow integration (Jira/ServiceNow/Slack/file). Off by
+    # default; network connectors' hosts must also be in network.allowed_domains.
+    "ticketing": {
+        "enabled": False,
+        "connector": "file",   # file | jira | slack
+        "path": "tickets.jsonl",
+        # "url": "https://org.atlassian.net", "project": "SEC",
+        # "email": "...", "token": "...",
+    },
     "pentest": {
         # explicit target allowlist; empty means no host may be probed
         "scope": [],

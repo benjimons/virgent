@@ -35,6 +35,8 @@ from .capabilities import (
 from .ccm import ControlMonitor
 from .cloud import build_cloud_provider
 from .identity import build_identity_provider, generate_access_reviews
+from .integrations import build_ticketer
+from .store import Store
 from .compliance.report import generate_report
 from .ingest import (
     FileIngestor,
@@ -128,6 +130,9 @@ class SecurityAgent:
         self.cloud_provider = build_cloud_provider(self.policy.policy)
         self.identity_provider = build_identity_provider(self.policy.policy)
         self.ccm = ControlMonitor(self.workdir / "ccm_state.json")
+        self.store = Store(self.workdir / "index.db")   # queryable read-model cache
+        self.ticketer = build_ticketer(
+            self.policy.policy, workdir=self.workdir, domain_check=self.policy.domain_allowed)
         self.pentest_prober = None  # inject a Prober for tests/dry-runs
 
         # notifications (stdout/file/webhook/slack); network channels are
@@ -705,6 +710,39 @@ class SecurityAgent:
         from .org import select_runbooks
         inc = self.soc.casebook.get_incident(incident_id)
         return select_runbooks(inc.rules)
+
+    # -- index (read model) & ticketing --------------------------------------
+
+    def reindex(self) -> dict:
+        """Rebuild the queryable SQLite index from current findings + incidents (audited)."""
+        self._enforce("store.reindex")
+        summary = self.store.rebuild(self.load_findings(), self.soc.casebook.all_incidents())
+        self.audit.record("store.reindex", params=summary)
+        return summary
+
+    def open_ticket(self, incident_id: str | None = None, finding_fingerprint: str | None = None) -> dict:
+        """Create a ticket for an incident or finding in the configured system (audited)."""
+        self._enforce("ticket.create", {"incident": incident_id})
+        if self.ticketer is None:
+            raise RuntimeError("no ticketing connector configured (policy 'ticketing.enabled')")
+        if incident_id:
+            inc = self.soc.casebook.get_incident(incident_id)
+            item = {"title": inc.title, "severity": inc.severity.value, "id": inc.id,
+                    "controls": [], "description": inc.summary or inc.title,
+                    "remediation": ", ".join(a["action"] for a in self.soc.plan(inc.id))}
+            kind = "incident"
+        else:
+            item = next((f.to_dict() for f in self.load_findings()
+                         if f.fingerprint == finding_fingerprint), None)
+            if item is None:
+                raise KeyError(f"no finding with fingerprint {finding_fingerprint}")
+            kind = "finding"
+        result = self.ticketer.create(kind, item)
+        self.audit.record("ticket.create", params={
+            "kind": kind, "target": incident_id or finding_fingerprint,
+            "connector": result.get("connector"), "ticket_id": result.get("ticket_id"),
+            "status": result.get("status")})
+        return result
 
     # -- SBOM & signing -------------------------------------------------------
 

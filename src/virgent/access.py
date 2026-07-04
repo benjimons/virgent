@@ -124,6 +124,8 @@ ACTION_SENSITIVITY: dict[str, Sensitivity] = {
     "attackpath.": Sensitivity.OBSERVE,
     "sbom.": Sensitivity.OBSERVE,
     "sign.": Sensitivity.OBSERVE,
+    "store.": Sensitivity.OBSERVE,
+    "ticket.create": Sensitivity.ENRICH,
     "monitor.": Sensitivity.OBSERVE,
     "vulns.": Sensitivity.OBSERVE,
     "soc.detect": Sensitivity.OBSERVE,
