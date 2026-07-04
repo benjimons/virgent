@@ -26,6 +26,7 @@ from .dependencies import DependencyAuditCapability  # noqa: E402
 from .iac import IaCCapability                      # noqa: E402
 from .host import HostInspectionCapability          # noqa: E402
 from .runtime import RuntimeInspectionCapability     # noqa: E402
+from .cloud import CloudPostureCapability            # noqa: E402
 from .llm_review import LLMReviewCapability         # noqa: E402
 
 __all__ = [
@@ -35,5 +36,6 @@ __all__ = [
     "IaCCapability",
     "HostInspectionCapability",
     "RuntimeInspectionCapability",
+    "CloudPostureCapability",
     "LLMReviewCapability",
 ]

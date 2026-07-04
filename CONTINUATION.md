@@ -59,7 +59,13 @@ Audit log = SHA-256 hash chain, optional per-record HMAC (`VIRGENT_AUDIT_KEY`).
   sweep, `discover.network` gated). `engine.discover`/`autodiscover`,
   `monitor_cycle(discover=True)`, CLI `discover` / `auto` / `watch --discover`.
   Scope lives in policy `discover`.
-- **Tests**: 143 passing (`pytest`). **CI**: `.github/workflows/ci.yml`.
+- **Cloud posture / CSPM** (`cloud/`, `capabilities/cloud.py`): `AWSProvider`
+  (boto3 read-only, lazy import, partial-permission tolerant) + `MockCloudProvider`;
+  normalized `CloudResource`; `CloudPostureCapability` (public S3, open SG,
+  unencrypted RDS, IAM key-age/MFA/admin). `engine.discover_cloud` +
+  `autodiscover(cloud=True)`, gated `discover.cloud`, policy `cloud` block,
+  CLI `discover --cloud` / `auto --cloud`. Extra: `pip install virgent[aws]`.
+- **Tests**: 155 passing (`pytest`). **CI**: `.github/workflows/ci.yml`.
 
 ## 4. Status
 

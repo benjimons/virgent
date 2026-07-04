@@ -132,6 +132,18 @@ virgent watch --discover         # continuous, picking up new assets each tick
 - **Network discovery** (scope-limited, approval-gated): sweeps only the CIDRs
   in the policy `discover.network_scope` to build a service inventory —
   reaching out to other machines is treated like pen testing.
+- **Cloud discovery / CSPM** (approval-gated): reaches *into* a cloud account
+  with its own read-only credentials (instance role / env / profile) and
+  enumerates the internal resources only a credentialed insider can see — S3
+  buckets, security groups, IAM users, RDS — then flags public storage, open
+  security groups, unencrypted data, and IAM hygiene (stale keys, missing MFA,
+  admin grants). Enable in the policy `cloud` block; run with `--cloud`:
+
+  ```bash
+  pip install 'virgent[aws]'
+  virgent discover --cloud          # enumerate + inventory the account
+  virgent auto --cloud              # + CSPM findings mapped to CIS/NIST/PCI/SOC2
+  ```
 
 The default is safe-by-design: it discovers within a scope, never outside it,
 and the scope is the authorization boundary. Point it at your estate by

@@ -21,6 +21,7 @@ from pathlib import Path
 from .audit import AuditLog
 from .capabilities import (
     Capability,
+    CloudPostureCapability,
     DependencyAuditCapability,
     HostInspectionCapability,
     IaCCapability,
@@ -28,6 +29,7 @@ from .capabilities import (
     RuntimeInspectionCapability,
     SecretScanCapability,
 )
+from .cloud import build_cloud_provider
 from .compliance.report import generate_report
 from .ingest import (
     FileIngestor,
@@ -107,12 +109,15 @@ class SecurityAgent:
         self.register_capability(IaCCapability())
         self.register_capability(HostInspectionCapability())
         self.register_capability(RuntimeInspectionCapability())
+        self.register_capability(CloudPostureCapability())
         if self.provider is not None:
             self.register_capability(LLMReviewCapability(reason=self.reason))
 
         self.integrity = IntegrityMonitor(self.workdir / "fim_baseline.json")
         self.vulns = VulnerabilityRegister(self.workdir / "vuln_register.json")
         self.discoverer = AssetDiscoverer.from_policy(self.policy.policy)
+        # cloud provider (None unless policy 'cloud.enabled'); inject for tests
+        self.cloud_provider = build_cloud_provider(self.policy.policy)
         self.pentest_prober = None  # inject a Prober for tests/dry-runs
 
         # notifications (stdout/file/webhook/slack); network channels are
@@ -262,14 +267,46 @@ class SecurityAgent:
         })
         return targets
 
-    def autodiscover(self, network: bool = False) -> dict:
+    def discover_cloud(self) -> list:
+        """Enumerate the cloud account's own resources (CSPM discovery).
+
+        Uses the configured provider's read-only credentials, so it sees the
+        internal/private resources only a credentialed insider can. Each
+        resource is registered as provenance-stamped ``cloud-asset`` evidence
+        that the cloud posture capability then evaluates. Gated + audited.
+        """
+        self._enforce("discover.cloud")
+        if self.cloud_provider is None:
+            raise RuntimeError(
+                "no cloud provider configured (set policy 'cloud.enabled: true' "
+                "and 'cloud.provider', or inject agent.cloud_provider)")
+        resources = self.cloud_provider.enumerate()
+        for r in resources:
+            self.provenance.register(
+                source=f"cloud:{r.provider}:{r.region}:{r.id}",
+                method="discover.cloud", kind="cloud-asset",
+                content=json.dumps(r.to_dict(), sort_keys=True),
+                collector=self.actor,
+                metadata={"provider": r.provider, "service": r.service, "rtype": r.rtype})
+        self.audit.record("discover.cloud", params={
+            "provider": self.cloud_provider.name,
+            "resources": len(resources),
+            "by_service": {s: sum(1 for r in resources if r.service == s)
+                           for s in {r.service for r in resources}},
+        })
+        return resources
+
+    def autodiscover(self, network: bool = False, cloud: bool = False) -> dict:
         """Discover assets and automatically ingest each through the right
         ingestor — the fully autonomous "find your own work" path. Network
-        services are recorded as inventory evidence (not ingested as text).
+        services and cloud resources are recorded as inventory/asset evidence.
         """
         targets = self.discover(network=network)
         ingested = 0
         inventory = 0
+        cloud_resources = 0
+        if cloud:
+            cloud_resources = len(self.discover_cloud())
         for t in targets:
             if t.ingestor == "file":
                 self.ingest(t.locator, ingestor="file")
@@ -290,7 +327,8 @@ class SecurityAgent:
                     kind="asset", content=json.dumps(t.to_dict(), sort_keys=True),
                     collector=self.actor, metadata=t.metadata)
                 inventory += 1
-        summary = {"targets": len(targets), "ingested": ingested, "inventory": inventory}
+        summary = {"targets": len(targets), "ingested": ingested,
+                   "inventory": inventory, "cloud_resources": cloud_resources}
         self.audit.record("discover.ingest", params=summary)
         return summary
 

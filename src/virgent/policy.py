@@ -43,6 +43,7 @@ DEFAULT_POLICY: dict = {
         "require_approval": [
             "collect.web",
             "discover.network",
+            "discover.cloud",
             "pentest.*",
             "remediate.*",
             "respond.*",
@@ -60,6 +61,15 @@ DEFAULT_POLICY: dict = {
         "log_globs": ["/var/log/*.log", "/var/log/*/*.log"],
         "include_host": True,
         "network_scope": [],   # e.g. ["10.0.0.0/24"]; empty = no network sweep
+    },
+    # Cloud posture (CSPM). Uses the account's own read-only credentials to
+    # enumerate internal resources; disabled by default. discover.cloud is
+    # approval-gated. Credentials come from the standard provider chain
+    # (instance role / env / profile) — never stored here.
+    "cloud": {
+        "enabled": False,
+        "provider": "aws",
+        "regions": [],         # e.g. ["us-east-1", "eu-west-1"]; empty = default region
     },
     "pentest": {
         # explicit target allowlist; empty means no host may be probed

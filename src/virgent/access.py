@@ -110,6 +110,7 @@ ACTION_SENSITIVITY: dict[str, Sensitivity] = {
     "discover.local": Sensitivity.OBSERVE,
     "discover.ingest": Sensitivity.OBSERVE,
     "discover.network": Sensitivity.ACTIVE,
+    "discover.cloud": Sensitivity.ENRICH,
     "notify.": Sensitivity.ENRICH,
     "scan.": Sensitivity.OBSERVE,
     "report.": Sensitivity.OBSERVE,

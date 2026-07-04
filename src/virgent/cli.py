@@ -104,12 +104,16 @@ def cmd_fim(args) -> int:
 
 def cmd_discover(args) -> int:
     agent = _agent(args)
+    human = Actor(id=f"cli:{getpass.getuser()}", type="human")
     if args.network:
-        agent.approve("discover.network", Actor(id=f"cli:{getpass.getuser()}", type="human"))
-    if args.ingest:
-        summary = agent.autodiscover(network=args.network)
-        print(f"discovered {summary['targets']} target(s); ingested {summary['ingested']}, "
-              f"inventoried {summary['inventory']}")
+        agent.approve("discover.network", human)
+    if args.cloud:
+        agent.approve("discover.cloud", human)
+    if args.ingest or args.cloud:
+        summary = agent.autodiscover(network=args.network, cloud=args.cloud)
+        print(f"discovered {summary['targets']} local target(s); "
+              f"ingested {summary['ingested']}, inventoried {summary['inventory']}, "
+              f"cloud resources {summary['cloud_resources']}")
         return 0
     targets = agent.discover(network=args.network)
     for t in targets:
@@ -124,9 +128,10 @@ def cmd_auto(args) -> int:
     agent = _agent(args, with_provider=args.llm)
     for pattern in args.approve or []:
         agent.approve(pattern, Actor(id=f"cli:{getpass.getuser()}", type="human"))
-    summary = agent.autodiscover(network=args.network)
-    print(f"discovered {summary['targets']} asset(s); "
-          f"ingested {summary['ingested']}, inventoried {summary['inventory']}")
+    summary = agent.autodiscover(network=args.network, cloud=args.cloud)
+    print(f"discovered {summary['targets']} local asset(s); "
+          f"ingested {summary['ingested']}, inventoried {summary['inventory']}, "
+          f"cloud resources {summary['cloud_resources']}")
     if args.online:
         agent.enable_online_dependency_checks()
     findings = agent.scan()
@@ -524,12 +529,14 @@ def main(argv: list[str] | None = None) -> int:
     p_fim_base.add_argument("paths", nargs="+")
     fim_sub.add_parser("check", help="detect changes vs the baseline")
 
-    p_discover = sub.add_parser("discover", help="autonomously find assets to secure (repos, logs, host; scoped network)")
+    p_discover = sub.add_parser("discover", help="autonomously find assets to secure (repos, logs, host; scoped network; cloud)")
     p_discover.add_argument("--network", action="store_true", help="also sweep the policy network_scope (approval-gated)")
+    p_discover.add_argument("--cloud", action="store_true", help="enumerate cloud resources via read-only credentials (approval-gated)")
     p_discover.add_argument("--ingest", action="store_true", help="ingest each discovered target immediately")
 
     p_auto = sub.add_parser("auto", help="fully autonomous: discover + ingest + scan + detect + report")
     p_auto.add_argument("--network", action="store_true", help="include scoped network discovery")
+    p_auto.add_argument("--cloud", action="store_true", help="include cloud posture (CSPM) discovery")
     p_auto.add_argument("--online", action="store_true", help="enable OSV vulnerability lookups")
     p_auto.add_argument("--llm", action="store_true", help="enable the LLM review capability")
     p_auto.add_argument("--approve", action="append", help="grant approval for a restricted action")
