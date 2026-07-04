@@ -102,6 +102,46 @@ def cmd_fim(args) -> int:
     return 2
 
 
+def cmd_discover(args) -> int:
+    agent = _agent(args)
+    if args.network:
+        agent.approve("discover.network", Actor(id=f"cli:{getpass.getuser()}", type="human"))
+    if args.ingest:
+        summary = agent.autodiscover(network=args.network)
+        print(f"discovered {summary['targets']} target(s); ingested {summary['ingested']}, "
+              f"inventoried {summary['inventory']}")
+        return 0
+    targets = agent.discover(network=args.network)
+    for t in targets:
+        print(f"  [{t.sensitivity:7}] {t.kind:8} {t.locator}"
+              + ("  (git)" if t.metadata.get("git") else ""))
+    print(f"\n{len(targets)} target(s) discovered.")
+    return 0
+
+
+def cmd_auto(args) -> int:
+    """Fully autonomous: discover assets, ingest, scan everything, detect, report."""
+    agent = _agent(args, with_provider=args.llm)
+    for pattern in args.approve or []:
+        agent.approve(pattern, Actor(id=f"cli:{getpass.getuser()}", type="human"))
+    summary = agent.autodiscover(network=args.network)
+    print(f"discovered {summary['targets']} asset(s); "
+          f"ingested {summary['ingested']}, inventoried {summary['inventory']}")
+    if args.online:
+        agent.enable_online_dependency_checks()
+    findings = agent.scan()
+    _, incidents = agent.soc_detect()
+    _print_findings(findings)
+    print(f"\n{len(findings)} finding(s), {len(incidents)} incident(s) "
+          f"across {len(agent.provenance.all_ids())} evidence items.")
+    if args.output:
+        Path(args.output).write_text(agent.report(fmt=args.format), encoding="utf-8")
+        print(f"wrote report: {args.output}")
+    verify = agent.verify_audit()
+    print(f"audit chain verified: {verify.ok} (head {agent.audit.head_hash[:16]}…)")
+    return 0 if verify.ok else 1
+
+
 def cmd_watch(args) -> int:
     import time
     agent = _agent(args)
@@ -113,11 +153,12 @@ def cmd_watch(args) -> int:
     print(f"watching {agent.ingestors['runtime'].hostname} every {args.interval}s "
           f"(caps={','.join(caps)}"
           + (f", logs={len(logs)}" if logs else "")
+          + (", auto-discover" if args.discover else "")
           + f"; {'forever' if not args.rounds else str(args.rounds) + ' round(s)'}); Ctrl-C to stop")
     try:
         while True:
             rounds += 1
-            cycle = agent.monitor_cycle(capabilities=caps, log_sources=logs)
+            cycle = agent.monitor_cycle(capabilities=caps, log_sources=logs, discover=args.discover)
             new_f = [f for f in cycle["findings"] if f.fingerprint not in seen_findings]
             for f in new_f:
                 seen_findings.add(f.fingerprint)
@@ -483,11 +524,24 @@ def main(argv: list[str] | None = None) -> int:
     p_fim_base.add_argument("paths", nargs="+")
     fim_sub.add_parser("check", help="detect changes vs the baseline")
 
+    p_discover = sub.add_parser("discover", help="autonomously find assets to secure (repos, logs, host; scoped network)")
+    p_discover.add_argument("--network", action="store_true", help="also sweep the policy network_scope (approval-gated)")
+    p_discover.add_argument("--ingest", action="store_true", help="ingest each discovered target immediately")
+
+    p_auto = sub.add_parser("auto", help="fully autonomous: discover + ingest + scan + detect + report")
+    p_auto.add_argument("--network", action="store_true", help="include scoped network discovery")
+    p_auto.add_argument("--online", action="store_true", help="enable OSV vulnerability lookups")
+    p_auto.add_argument("--llm", action="store_true", help="enable the LLM review capability")
+    p_auto.add_argument("--approve", action="append", help="grant approval for a restricted action")
+    p_auto.add_argument("--format", choices=["markdown", "json"], default="markdown")
+    p_auto.add_argument("-o", "--output", default=None, help="write the report to a file")
+
     p_watch = sub.add_parser("watch", help="continuously monitor the live system, alerting on new findings")
     p_watch.add_argument("--interval", type=int, default=60, help="seconds between ticks (default 60)")
     p_watch.add_argument("--rounds", type=int, default=0, help="stop after N ticks (default: run forever)")
     p_watch.add_argument("--capability", action="append", help="capabilities to run each tick")
     p_watch.add_argument("--log", action="append", help="log file to tail + run SOC detection each tick (repeatable, offset-tracked)")
+    p_watch.add_argument("--discover", action="store_true", help="auto-discover new assets each tick")
 
     p_notify = sub.add_parser("notify", help="notification channels (decisions, incidents)")
     notify_sub = p_notify.add_subparsers(dest="notify_command", required=True)
@@ -570,6 +624,8 @@ def main(argv: list[str] | None = None) -> int:
         "org": cmd_org,
         "posture": cmd_posture,
         "ingest": cmd_ingest,
+        "discover": cmd_discover,
+        "auto": cmd_auto,
         "host": cmd_host,
         "runtime": cmd_runtime,
         "fim": cmd_fim,

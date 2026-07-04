@@ -115,6 +115,28 @@ High **risk** bumps the required role up the chain (a CRITICAL incident's
 approver escalates it further rather than resolving it. Approvals persist and
 are consumed once. Everything is audited. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Autonomous operation
+
+Virgent finds its own work — you don't have to name every target. Discovery is
+bounded by policy (a declared scope), and every discovered asset is
+provenance-stamped and audited like any other input:
+
+```bash
+virgent discover                 # list assets it found (repos, logs, host)
+virgent auto                     # discover + ingest + scan + detect + report, unattended
+virgent watch --discover         # continuous, picking up new assets each tick
+```
+
+- **Local discovery** (read-only, autonomous): git repositories under
+  configured roots, log files, and the host/runtime itself.
+- **Network discovery** (scope-limited, approval-gated): sweeps only the CIDRs
+  in the policy `discover.network_scope` to build a service inventory —
+  reaching out to other machines is treated like pen testing.
+
+The default is safe-by-design: it discovers within a scope, never outside it,
+and the scope is the authorization boundary. Point it at your estate by
+editing the `discover` block in `policy.yaml`.
+
 ## Running always-on
 
 One process monitors the live system forever — host hardening drift,

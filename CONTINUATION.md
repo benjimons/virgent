@@ -54,7 +54,12 @@ Audit log = SHA-256 hash chain, optional per-record HMAC (`VIRGENT_AUDIT_KEY`).
 - **Always-on**: `monitor_cycle`, offset-tracked log tailing (`ingest/tail.py`),
   notification dispatcher (`notify/`), real response executors
   (`soc/executors.py`); `deploy/` has systemd/Docker/compose + DEPLOYMENT.md.
-- **Tests**: 135 passing (`pytest`). **CI**: `.github/workflows/ci.yml`.
+- **Autonomous discovery** (`discovery.py`): `AssetDiscoverer` finds its own
+  work — local (repos/logs/host, read-only, auto) and network (scoped CIDR
+  sweep, `discover.network` gated). `engine.discover`/`autodiscover`,
+  `monitor_cycle(discover=True)`, CLI `discover` / `auto` / `watch --discover`.
+  Scope lives in policy `discover`.
+- **Tests**: 143 passing (`pytest`). **CI**: `.github/workflows/ci.yml`.
 
 ## 4. Status
 

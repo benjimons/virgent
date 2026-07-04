@@ -33,6 +33,7 @@ jobs:
           virgent --workdir /tmp/wd frameworks
           virgent --workdir /tmp/wd org overview
           virgent --workdir /tmp/wd ingest /tmp/demo
+          virgent --workdir /tmp/wd discover
           virgent --workdir /tmp/wd scan
           virgent --workdir /tmp/wd host --scan
           virgent --workdir /tmp/wd runtime --scan

@@ -29,6 +29,7 @@ DEFAULT_POLICY: dict = {
             "collect.host",
             "collect.runtime",
             "collect.tail",
+            "discover.local",
             "scan.*",
             "report.*",
             "audit.*",
@@ -41,6 +42,7 @@ DEFAULT_POLICY: dict = {
         ],
         "require_approval": [
             "collect.web",
+            "discover.network",
             "pentest.*",
             "remediate.*",
             "respond.*",
@@ -49,6 +51,15 @@ DEFAULT_POLICY: dict = {
     },
     "network": {
         "allowed_domains": ["api.osv.dev"],
+    },
+    # Autonomous asset discovery. Local discovery is read-only and runs
+    # unattended; network discovery is scope-limited (only these CIDRs/hosts
+    # are ever swept) and requires approval.
+    "discover": {
+        "roots": ["/workspace", "/srv", "/opt", "/home"],
+        "log_globs": ["/var/log/*.log", "/var/log/*/*.log"],
+        "include_host": True,
+        "network_scope": [],   # e.g. ["10.0.0.0/24"]; empty = no network sweep
     },
     "pentest": {
         # explicit target allowlist; empty means no host may be probed

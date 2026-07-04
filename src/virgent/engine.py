@@ -44,6 +44,7 @@ from .access import (
     EscalationRequired,
     Sensitivity,
 )
+from .discovery import AssetDiscoverer
 from .ingest.runtime import RuntimeIngestor
 from .ingest.tail import TailIngestor
 from .integrity import IntegrityMonitor
@@ -111,6 +112,7 @@ class SecurityAgent:
 
         self.integrity = IntegrityMonitor(self.workdir / "fim_baseline.json")
         self.vulns = VulnerabilityRegister(self.workdir / "vuln_register.json")
+        self.discoverer = AssetDiscoverer.from_policy(self.policy.policy)
         self.pentest_prober = None  # inject a Prober for tests/dry-runs
 
         # notifications (stdout/file/webhook/slack); network channels are
@@ -237,6 +239,60 @@ class SecurityAgent:
             detail=f"approved by {approver.id}",
             actor=approver,
         )
+
+    # -- autonomous discovery ------------------------------------------------
+
+    def discover(self, network: bool = False) -> list:
+        """Find the agent's own work, bounded by policy scope (audited).
+
+        Local discovery is autonomous (read-only). Network discovery is
+        scope-limited and gated — the same ``discover.network`` policy action
+        must be allowed (approval + a declared ``network_scope``).
+        """
+        self._enforce("discover.local")
+        targets = self.discoverer.discover_local()
+        if network:
+            self._enforce("discover.network", {"scope": self.discoverer.network_scope})
+            targets += self.discoverer.discover_network()
+        self.audit.record("discover.local", params={
+            "targets": len(targets),
+            "by_kind": {k: sum(1 for t in targets if t.kind == k)
+                        for k in {t.kind for t in targets}},
+            "network": network,
+        })
+        return targets
+
+    def autodiscover(self, network: bool = False) -> dict:
+        """Discover assets and automatically ingest each through the right
+        ingestor — the fully autonomous "find your own work" path. Network
+        services are recorded as inventory evidence (not ingested as text).
+        """
+        targets = self.discover(network=network)
+        ingested = 0
+        inventory = 0
+        for t in targets:
+            if t.ingestor == "file":
+                self.ingest(t.locator, ingestor="file")
+                ingested += 1
+                if t.metadata.get("git"):
+                    try:
+                        self.ingest(t.locator, ingestor="git")
+                    except (RuntimeError, FileNotFoundError):
+                        pass
+            elif t.ingestor in ("tail", "host", "runtime"):
+                loc = "localhost" if t.ingestor in ("host", "runtime") else t.locator
+                self.ingest(loc, ingestor=t.ingestor)
+                ingested += 1
+            elif t.kind == "service":
+                # scoped network asset: record as provenance-stamped inventory
+                self.provenance.register(
+                    source=f"asset:{t.locator}", method="discover.network",
+                    kind="asset", content=json.dumps(t.to_dict(), sort_keys=True),
+                    collector=self.actor, metadata=t.metadata)
+                inventory += 1
+        summary = {"targets": len(targets), "ingested": ingested, "inventory": inventory}
+        self.audit.record("discover.ingest", params=summary)
+        return summary
 
     # -- ingestion -----------------------------------------------------------
 
@@ -595,20 +651,41 @@ class SecurityAgent:
         self,
         capabilities: list[str] | None = None,
         log_sources: list[str] | None = None,
+        discover: bool = False,
     ) -> dict:
         """One full always-on monitoring cycle.
 
         Covers live host/runtime/integrity state plus, if ``log_sources`` are
-        given, re-ingestion of those logs and a SOC detection pass. This is the
-        unit a long-running ``virgent watch`` service repeats forever. Returns
-        this cycle's findings and current incidents; alerts/incidents dedup by
+        given, re-ingestion of those logs and a SOC detection pass. With
+        ``discover=True`` it first auto-discovers assets (repos, logs, host)
+        and folds any newly found logs into this cycle's detection — so a
+        long-running watcher picks up new work on its own. This is the unit a
+        ``virgent watch`` service repeats forever; alerts/incidents dedup by
         stable identity, so repeating the cycle doesn't create duplicates.
         """
-        caps = capabilities or ["host", "runtime"]
+        caps = list(capabilities or ["host", "runtime"])
+        sources = list(log_sources or [])
+        if discover:
+            repos_found = False
+            for t in self.discover(network=False):
+                if t.ingestor == "file":  # a discovered repo / code tree
+                    self.ingest(t.locator, ingestor="file")
+                    repos_found = True
+                    if t.metadata.get("git"):
+                        try:
+                            self.ingest(t.locator, ingestor="git")
+                        except (RuntimeError, FileNotFoundError):
+                            pass
+                elif t.kind == "log" and t.locator not in sources:
+                    sources.append(t.locator)   # host/runtime handled by the tick
+            if repos_found:  # analyze the code we just found
+                for c in ("secrets", "dependencies", "iac"):
+                    if c not in caps:
+                        caps.append(c)
         findings = self.monitor_tick(capabilities=caps)
         incidents: list = []
-        if log_sources:
-            for src in log_sources:
+        if sources:
+            for src in sources:
                 try:
                     # offset-tracked: only new lines are ingested each cycle
                     self.ingest(src, ingestor="tail")
