@@ -35,6 +35,8 @@ DEFAULT_POLICY: dict = {
             "audit.*",
             "fim.*",
             "ccm.*",
+            "ciem.*",
+            "attackpath.*",
             "identity.reviews",
             "monitor.*",
             "vulns.*",

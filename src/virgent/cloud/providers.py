@@ -177,16 +177,122 @@ class AWSProvider:
         return res
 
 
-def build_cloud_provider(policy: dict, session=None) -> "CloudProvider | None":
-    """Construct a cloud provider from the ``cloud`` policy block.
+class GCPProvider:
+    """Read-only Google Cloud enumeration.
 
-    Returns None unless a provider is explicitly enabled — reaching into a
-    cloud account is never on by accident.
+    Normalizes to the same config keys as AWS so one CSPM rule set covers all
+    clouds. The ``client`` is injectable (a fake in tests); the default path
+    would use the google-cloud SDK.
+    """
+
+    name = "gcp"
+
+    def __init__(self, project: str = "", client=None):
+        self.project = project
+        self.client = client   # injected; default SDK wiring omitted for offline safety
+
+    def enumerate(self) -> list[CloudResource]:
+        if self.client is None:  # pragma: no cover - needs the SDK + creds
+            raise RuntimeError("GCPProvider needs an injected client (google-cloud SDK wiring)")
+        out: list[CloudResource] = []
+        for b in self.client.list_buckets() or []:
+            out.append(CloudResource(
+                provider="gcp", service="gcs", rtype="bucket", id=b["name"],
+                config={"public": bool(b.get("public")),
+                        "encrypted": bool(b.get("encrypted", True)),
+                        "public_access_block": not b.get("public")}))
+        for fw in self.client.list_firewalls() or []:
+            open_ingress = []
+            if "0.0.0.0/0" in (fw.get("sourceRanges") or []):
+                for allowed in fw.get("allowed", []):
+                    for p in allowed.get("ports", [None]):
+                        frm = int(p) if p and str(p).isdigit() else None
+                        open_ingress.append({"from": frm, "to": frm, "proto": allowed.get("IPProtocol")})
+            out.append(CloudResource(
+                provider="gcp", service="gcp", rtype="firewall", id=fw["name"],
+                config={"open_ingress": open_ingress}))
+        for sa in self.client.list_service_accounts() or []:
+            out.append(CloudResource(
+                provider="gcp", service="gcp", rtype="service_account", id=sa["email"],
+                config={"admin_policy": bool(sa.get("owner_or_editor")),
+                        "mfa_enabled": True, "console_access": False,
+                        "max_access_key_age_days": sa.get("key_age_days")}))
+        return out
+
+
+class AzureProvider:
+    """Read-only Azure enumeration, normalized to shared config keys."""
+
+    name = "azure"
+
+    def __init__(self, subscription: str = "", client=None):
+        self.subscription = subscription
+        self.client = client
+
+    def enumerate(self) -> list[CloudResource]:
+        if self.client is None:  # pragma: no cover - needs the SDK + creds
+            raise RuntimeError("AzureProvider needs an injected client (azure-mgmt SDK wiring)")
+        out: list[CloudResource] = []
+        for s in self.client.list_storage_accounts() or []:
+            out.append(CloudResource(
+                provider="azure", service="azure", rtype="storage_account", id=s["name"],
+                config={"public": bool(s.get("allow_blob_public_access")),
+                        "encrypted": bool(s.get("encryption", True)),
+                        "public_access_block": not s.get("allow_blob_public_access")}))
+        for nsg in self.client.list_network_security_groups() or []:
+            open_ingress = []
+            for rule in nsg.get("rules", []):
+                if rule.get("access") == "Allow" and rule.get("source") in ("*", "0.0.0.0/0", "Internet"):
+                    port = rule.get("port")
+                    frm = int(port) if port and str(port).isdigit() else None
+                    open_ingress.append({"from": frm, "to": frm, "proto": rule.get("protocol")})
+            out.append(CloudResource(
+                provider="azure", service="azure", rtype="nsg", id=nsg["name"],
+                config={"open_ingress": open_ingress}))
+        return out
+
+
+class CompositeCloudProvider:
+    """Enumerates several providers as one (multi-cloud)."""
+
+    name = "multi-cloud"
+
+    def __init__(self, providers: list):
+        self.providers = providers
+
+    def enumerate(self) -> list[CloudResource]:
+        out: list[CloudResource] = []
+        for p in self.providers:
+            try:
+                out += p.enumerate()
+            except Exception:  # noqa: BLE001 - one cloud's failure shouldn't blind the others
+                continue
+        return out
+
+
+def _build_one(spec: dict, session=None):
+    provider = spec.get("provider", "aws")
+    if provider == "aws":
+        return AWSProvider(regions=spec.get("regions"), session=session)
+    if provider == "gcp":
+        return GCPProvider(project=spec.get("project", ""))
+    if provider == "azure":
+        return AzureProvider(subscription=spec.get("subscription", ""))
+    return None
+
+
+def build_cloud_provider(policy: dict, session=None) -> "CloudProvider | None":
+    """Construct a cloud provider (or a multi-cloud composite) from policy.
+
+    Returns None unless explicitly enabled — reaching into a cloud account is
+    never on by accident. ``cloud.providers`` (a list) builds a composite;
+    otherwise the single ``cloud.provider`` is used.
     """
     cfg = (policy or {}).get("cloud") or {}
     if not cfg.get("enabled"):
         return None
-    provider = cfg.get("provider", "aws")
-    if provider == "aws":
-        return AWSProvider(regions=cfg.get("regions"), session=session)
-    return None
+    specs = cfg.get("providers")
+    if specs:
+        built = [p for p in (_build_one(s, session) for s in specs) if p]
+        return CompositeCloudProvider(built) if built else None
+    return _build_one(cfg, session)

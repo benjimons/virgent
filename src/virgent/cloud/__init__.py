@@ -13,8 +13,11 @@ network or credentials to be importable or testable.
 """
 from .providers import (
     AWSProvider,
+    AzureProvider,
     CloudProvider,
     CloudResource,
+    CompositeCloudProvider,
+    GCPProvider,
     MockCloudProvider,
     build_cloud_provider,
 )
@@ -23,6 +26,9 @@ __all__ = [
     "CloudResource",
     "CloudProvider",
     "AWSProvider",
+    "GCPProvider",
+    "AzureProvider",
+    "CompositeCloudProvider",
     "MockCloudProvider",
     "build_cloud_provider",
 ]

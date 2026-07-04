@@ -659,6 +659,28 @@ class SecurityAgent:
         inc = self.soc.casebook.get_incident(incident_id)
         return select_runbooks(inc.rules)
 
+    # -- CIEM & attack-path analysis ------------------------------------------
+
+    def ciem_analyze(self) -> list[Finding]:
+        """Aggregate cloud/identity entitlement analysis (audited)."""
+        self._enforce("ciem.analyze")
+        from .ciem import analyze_entitlements
+        findings = analyze_entitlements(self.load_evidence())
+        self._persist_findings(findings)
+        self.audit.record("ciem.analyze", params={
+            "findings": len(findings), "finding_ids": [f.id for f in findings]})
+        return findings
+
+    def attack_paths(self) -> list[Finding]:
+        """Correlate existing findings into toxic attack paths (audited)."""
+        self._enforce("attackpath.correlate")
+        from .attackpath import correlate_attack_paths
+        paths = correlate_attack_paths(self.load_findings())
+        self._persist_findings(paths)
+        self.audit.record("attackpath.correlate", params={
+            "paths": len(paths), "path_ids": [p.id for p in paths]})
+        return paths
+
     # -- continuous control monitoring ----------------------------------------
 
     def ccm_assess(self) -> dict:

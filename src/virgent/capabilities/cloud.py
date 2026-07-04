@@ -108,10 +108,21 @@ def check_iam_user(r: dict) -> list[dict]:
 
 
 _DISPATCH = {
+    # AWS
     ("s3", "bucket"): check_bucket,
     ("ec2", "security_group"): check_security_group,
     ("rds", "db_instance"): check_rds,
     ("iam", "user"): check_iam_user,
+    # GCP (normalized to the same config keys)
+    ("gcs", "bucket"): check_bucket,
+    ("gcp", "firewall"): check_security_group,
+    ("gcp", "sql_instance"): check_rds,
+    ("gcp", "service_account"): check_iam_user,
+    # Azure
+    ("azure", "storage_account"): check_bucket,
+    ("azure", "nsg"): check_security_group,
+    ("azure", "sql"): check_rds,
+    ("azure", "user"): check_iam_user,
 }
 
 

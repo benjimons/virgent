@@ -453,6 +453,24 @@ def cmd_frameworks(args) -> int:
     return 0
 
 
+def cmd_ciem(args) -> int:
+    agent = _agent(args)
+    findings = agent.ciem_analyze()
+    _print_findings(findings)
+    print(f"\n{len(findings)} entitlement finding(s).")
+    return 0
+
+
+def cmd_attackpaths(args) -> int:
+    agent = _agent(args)
+    paths = agent.attack_paths()
+    for p in sorted(paths, key=lambda f: f.severity.rank):
+        print(f"[{p.severity.value.upper():8}] {p.title}")
+        print(f"           {p.description[:160]}")
+    print(f"\n{len(paths)} attack path(s) correlated.")
+    return 0
+
+
 def cmd_identity(args) -> int:
     agent = _agent(args)
     human = Actor(id=f"cli:{getpass.getuser()}", type="human")
@@ -654,6 +672,9 @@ def main(argv: list[str] | None = None) -> int:
     p_assess.add_argument("--format", choices=["markdown", "json"], default="markdown")
     p_assess.add_argument("-o", "--output", default=None, help="write the report to a file")
 
+    sub.add_parser("ciem", help="cloud/identity entitlement analysis (privilege concentration, toxic combos)")
+    sub.add_parser("attackpaths", help="correlate findings into toxic attack paths")
+
     p_identity = sub.add_parser("identity", help="identity posture (IdP hygiene) and access reviews")
     id_sub = p_identity.add_subparsers(dest="identity_command")
     id_sub.add_parser("posture", help="enumerate IdP accounts and scan for hygiene issues (gated)")
@@ -697,6 +718,8 @@ def main(argv: list[str] | None = None) -> int:
         "scan": cmd_scan,
         "assess": cmd_assess,
         "identity": cmd_identity,
+        "ciem": cmd_ciem,
+        "attackpaths": cmd_attackpaths,
         "ccm": cmd_ccm,
         "report": cmd_report,
         "audit": cmd_audit,
