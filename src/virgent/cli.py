@@ -453,6 +453,28 @@ def cmd_frameworks(args) -> int:
     return 0
 
 
+def cmd_ccm(args) -> int:
+    agent = _agent(args)
+    result = agent.ccm_assess()
+    s = result["summary"]
+    if args.ccm_command == "summary":
+        print(f"controls monitored: {s['controls_monitored']}  "
+              f"compliance: {s['compliance_pct']}%")
+        print(f"  by status: {s['by_status']}")
+        if s["overdue"]:
+            print(f"  OVERDUE ({len(s['overdue'])}): {', '.join(s['overdue'])}")
+        return 0
+    # default / list: show each control
+    for r in sorted(result["results"], key=lambda r: (r["status"] != "fail", r["control_id"])):
+        mark = {"fail": "✗", "pass": "✓", "not_assessed": "·"}.get(r["status"], "?")
+        due = f"  due {r['due_at'][:10]}" if r["due_at"] else ""
+        over = "  OVERDUE" if r.get("overdue") else ""
+        print(f"  {mark} {r['control_id']:18} [{r['status']:12}] owner={r['owner']:22}"
+              f" {r['title'][:40]}{due}{over}")
+    print(f"\ncompliance: {s['compliance_pct']}%  ({s['by_status']})")
+    return 0
+
+
 def cmd_report(args) -> int:
     agent = _agent(args)
     rendered = agent.report(fmt=args.format)
@@ -613,6 +635,11 @@ def main(argv: list[str] | None = None) -> int:
     p_assess.add_argument("--format", choices=["markdown", "json"], default="markdown")
     p_assess.add_argument("-o", "--output", default=None, help="write the report to a file")
 
+    p_ccm = sub.add_parser("ccm", help="continuous control monitoring: per-control pass/fail + SLA")
+    ccm_sub = p_ccm.add_subparsers(dest="ccm_command")
+    ccm_sub.add_parser("list", help="show each monitored control's status (default)")
+    ccm_sub.add_parser("summary", help="compliance summary + overdue controls")
+
     p_report = sub.add_parser("report", help="generate an auditor-ready report")
     p_report.add_argument("--format", choices=["markdown", "json"], default="markdown")
     p_report.add_argument("-o", "--output", default=None)
@@ -645,6 +672,7 @@ def main(argv: list[str] | None = None) -> int:
         "decide": cmd_decide,
         "scan": cmd_scan,
         "assess": cmd_assess,
+        "ccm": cmd_ccm,
         "report": cmd_report,
         "audit": cmd_audit,
         "ask": cmd_ask,

@@ -117,6 +117,7 @@ ACTION_SENSITIVITY: dict[str, Sensitivity] = {
     "audit.": Sensitivity.OBSERVE,
     "fim.baseline": Sensitivity.OBSERVE,
     "fim.check": Sensitivity.OBSERVE,
+    "ccm.": Sensitivity.OBSERVE,
     "monitor.": Sensitivity.OBSERVE,
     "vulns.": Sensitivity.OBSERVE,
     "soc.detect": Sensitivity.OBSERVE,

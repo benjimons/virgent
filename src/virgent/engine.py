@@ -29,6 +29,7 @@ from .capabilities import (
     RuntimeInspectionCapability,
     SecretScanCapability,
 )
+from .ccm import ControlMonitor
 from .cloud import build_cloud_provider
 from .compliance.report import generate_report
 from .ingest import (
@@ -118,6 +119,7 @@ class SecurityAgent:
         self.discoverer = AssetDiscoverer.from_policy(self.policy.policy)
         # cloud provider (None unless policy 'cloud.enabled'); inject for tests
         self.cloud_provider = build_cloud_provider(self.policy.policy)
+        self.ccm = ControlMonitor(self.workdir / "ccm_state.json")
         self.pentest_prober = None  # inject a Prober for tests/dry-runs
 
         # notifications (stdout/file/webhook/slack); network channels are
@@ -616,6 +618,27 @@ class SecurityAgent:
         from .org import select_runbooks
         inc = self.soc.casebook.get_incident(incident_id)
         return select_runbooks(inc.rules)
+
+    # -- continuous control monitoring ----------------------------------------
+
+    def ccm_assess(self) -> dict:
+        """Evaluate every monitored control against current findings (audited).
+
+        Returns per-control pass/fail state plus a compliance summary. Each
+        failing control gets an owner and an SLA-driven remediation due date.
+        """
+        self._enforce("ccm.assess")
+        findings = self.load_findings()
+        active = list(self.capabilities) + ["soc", "fim"]
+        results = self.ccm.assess(findings, active)
+        summary = self.ccm.summary(results)
+        self.audit.record("ccm.assess", params={
+            "controls": summary["controls_monitored"],
+            "compliance_pct": summary["compliance_pct"],
+            "by_status": summary["by_status"],
+            "overdue": len(summary["overdue"]),
+        })
+        return {"summary": summary, "results": [r.to_dict() for r in results]}
 
     # -- security-program posture ---------------------------------------------
 
