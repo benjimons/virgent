@@ -175,6 +175,36 @@ Deploy it as a service with `deploy/virgent-watch.service` (systemd) or
 `deploy/docker-compose.yml`. Full topology, durability/WORM guidance, and the
 human decision loop are in [deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md).
 
+## GRC, cloud, identity, AppSec, and the platform
+
+Beyond scanning, Virgent runs the functions a security program needs:
+
+```bash
+virgent ccm                    # continuous control monitoring: per-control pass/fail + SLA
+virgent identity posture       # IdP hygiene (MFA/dormant/admin); 'identity reviews' for recert
+virgent discover --cloud       # multi-cloud CSPM (AWS/GCP/Azure)
+virgent ciem                   # entitlement analysis: privilege concentration, toxic combos
+virgent attackpaths            # correlate findings into toxic attack paths
+virgent sbom -o sbom.json --sign   # CycloneDX SBOM + detached signature
+virgent query findings --severity high     # query the SQLite read-index
+virgent ticket --incident inc-…            # open a Jira/Slack/file ticket
+virgent serve --token "$TOKEN"             # HTTP API + console (localhost, bearer-auth)
+```
+
+- **Continuous Control Monitoring** turns the control catalog into live
+  pass/fail state with owners and SLA-driven due dates — a GRC system of
+  record, not a scanner.
+- **Identity security** reads your IdP (Okta/Entra/Google) for MFA coverage,
+  dormant/admin accounts, and generates access-review campaigns.
+- **CIEM + attack paths** surface privilege concentration and the toxic
+  combinations (internet exposure + over-privilege) that single findings miss.
+- **AppSec/supply-chain**: taint-style SAST, container image hygiene, a
+  CycloneDX SBOM, and detached HMAC signing of reports/SBOMs.
+- **Detection content**: import your Sigma rules, enrich alerts with threat
+  intel, and score detection quality with the eval harness.
+- **Platform**: a SQLite read-index, a bearer-token HTTP API + console, and
+  Jira/Slack/file ticketing — the surface a team operates on.
+
 ## Compliance
 
 ```bash

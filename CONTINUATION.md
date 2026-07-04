@@ -65,7 +65,21 @@ Audit log = SHA-256 hash chain, optional per-record HMAC (`VIRGENT_AUDIT_KEY`).
   unencrypted RDS, IAM key-age/MFA/admin). `engine.discover_cloud` +
   `autodiscover(cloud=True)`, gated `discover.cloud`, policy `cloud` block,
   CLI `discover --cloud` / `auto --cloud`. Extra: `pip install virgent[aws]`.
-- **Tests**: 155 passing (`pytest`). **CI**: `.github/workflows/ci.yml`.
+- **Continuous Control Monitoring** (`ccm.py`): per-control pass/fail/not-assessed
+  with owner + SLA + persistent state; `engine.ccm_assess`, CLI `ccm`.
+- **Identity security** (`identity/`, `capabilities/identity.py`): IdP posture
+  (MFA/dormant/admin/stale) + access reviews; Okta/mock providers.
+- **Multi-cloud + CIEM + attack paths** (`cloud/` GCP+Azure+composite,
+  `ciem.py`, `attackpath.py`): one CSPM rule set across clouds, privilege
+  concentration/toxic combos, correlated attack paths.
+- **AppSec/supply chain** (`capabilities/sast.py`, `capabilities/image.py`,
+  `sbom.py`, `signing.py`): taint-style SAST, image scan, CycloneDX SBOM,
+  detached HMAC signing.
+- **Detection content** (`soc/threatintel.py`, `soc/sigma.py`, `soc/eval.py`):
+  IOC enrichment, Sigma import, precision/recall eval harness.
+- **Platform** (`store.py`, `api.py`, `integrations.py`): SQLite read-index,
+  bearer-token HTTP API + console, Jira/Slack/file ticketing.
+- **Tests**: 210 passing (`pytest`). **CI**: `.github/workflows/ci.yml`.
 
 ## 4. Status
 
@@ -78,7 +92,7 @@ owner to grant Contents:write; that was resolved and pushes work.)
 
 ```bash
 git checkout claude/enterprise-security-agent-0fa25c
-pip install -e '.[dev]' && pytest          # 113 tests must stay green
+pip install -e '.[dev]' && pytest          # 210 tests must stay green
 export VIRGENT_AUDIT_KEY=$(openssl rand -hex 32)
 virgent init && virgent assess . --host --runtime -o report.md
 virgent posture && virgent audit verify

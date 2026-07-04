@@ -41,6 +41,10 @@ jobs:
           virgent --workdir /tmp/wd watch --rounds 1 --interval 0 --capability runtime --log /tmp/demo/auth.log
           virgent --workdir /tmp/wd soc detect
           virgent --workdir /tmp/wd vulns sync
+          virgent --workdir /tmp/wd ccm summary
+          virgent --workdir /tmp/wd query findings --severity high
+          virgent --workdir /tmp/wd sbom -o /tmp/sbom.json
+          virgent --workdir /tmp/wd attackpaths
           virgent --workdir /tmp/wd posture
           virgent --workdir /tmp/wd report --format json -o /tmp/report.json
           virgent --workdir /tmp/wd audit verify
