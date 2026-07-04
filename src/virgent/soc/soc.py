@@ -30,11 +30,14 @@ Respond as JSON: {"assessment": str, "true_positive_likelihood": "high"|"medium"
 class SOC:
     def __init__(self, directory: str | Path,
                  config: DetectionConfig | None = None,
-                 reason: Callable | None = None):
+                 reason: Callable | None = None,
+                 extra_rules: list | None = None,
+                 threat_intel=None):
         self.dir = Path(directory)
-        self.detector = DetectionEngine(config)
+        self.detector = DetectionEngine(config, extra_rules=extra_rules)
         self.casebook = Casebook(self.dir)
         self.reason = reason
+        self.threat_intel = threat_intel   # ThreatIntel | None
 
     def process_evidence(self, evidence: list[Evidence]) -> tuple[list[Alert], list[Incident]]:
         events = []
@@ -42,6 +45,8 @@ class SOC:
             if ev.kind in ("log", "data", "event", "text"):
                 events.extend(parse_evidence(ev))
         alerts = self.detector.run(events)
+        if self.threat_intel is not None:
+            self.threat_intel.enrich_alerts(alerts)
         self.casebook.upsert_alerts(alerts)
         incidents = correlate(self.casebook.all_alerts())
         incidents = self.casebook.merge_incidents(incidents)

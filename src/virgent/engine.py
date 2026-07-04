@@ -141,9 +141,11 @@ class SecurityAgent:
         self.broker = DecisionBroker(
             self.workdir / "decisions.json", self.autonomy, audit=self._audit_and_notify)
 
-        # SOC
+        # SOC — with imported Sigma rules and threat-intel enrichment from policy
         soc_reason = self.reason if self.provider is not None else None
-        self.soc = SOC(self.workdir / "soc", reason=soc_reason)
+        sigma_rules, threat_intel = self._load_detection_content()
+        self.soc = SOC(self.workdir / "soc", reason=soc_reason,
+                       extra_rules=sigma_rules, threat_intel=threat_intel)
         # real response executor from policy (default None -> dry-run); actions
         # are gated by the access model regardless of which executor runs them
         self.response_executor = build_executor(
@@ -156,6 +158,36 @@ class SecurityAgent:
             "platform": platform.platform(),
             "provider": getattr(self.provider, "name", None),
         })
+
+    def _load_detection_content(self):
+        """Build imported Sigma rules and a threat-intel feed from policy.
+
+        policy 'detection': {sigma_rules: [<path>...], sigma_inline: "<yaml>",
+        threat_feed: <path>}. All optional and best-effort — a broken rule file
+        never blocks startup.
+        """
+        cfg = (self.policy.policy.get("detection") or {})
+        rules = []
+        try:
+            from .soc.sigma import load_sigma_rules
+            for path in cfg.get("sigma_rules") or []:
+                try:
+                    rules += load_sigma_rules(Path(path).read_text(encoding="utf-8"))
+                except OSError:
+                    continue
+            if cfg.get("sigma_inline"):
+                rules += load_sigma_rules(cfg["sigma_inline"])
+        except Exception:  # noqa: BLE001 - detection import must not break init
+            rules = []
+        intel = None
+        feed = cfg.get("threat_feed")
+        if feed:
+            try:
+                from .soc.threatintel import ThreatIntel
+                intel = ThreatIntel.from_file(feed)
+            except (OSError, ValueError):
+                intel = None
+        return rules, intel
 
     # -- policy enforcement (audited) ----------------------------------------
 
@@ -595,6 +627,17 @@ class SecurityAgent:
         })
         self._notify_new_incidents(incidents)
         return alerts, incidents
+
+    def soc_eval(self, cases: list) -> dict:
+        """Score detection quality (precision/recall/F1) over labeled cases (audited)."""
+        self._enforce("soc.eval")
+        from .soc.eval import evaluate
+        metrics = evaluate(cases, self.soc.detector)
+        result = metrics.to_dict()
+        self.audit.record("soc.eval", params={
+            "cases": len(cases), "precision": result["precision"],
+            "recall": result["recall"], "f1": result["f1"]})
+        return result
 
     def soc_triage(self, incident_id: str):
         self._enforce("soc.triage", {"incident": incident_id})

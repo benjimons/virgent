@@ -38,8 +38,11 @@ class DetectionConfig:
 
 
 class DetectionEngine:
-    def __init__(self, config: DetectionConfig | None = None):
+    def __init__(self, config: DetectionConfig | None = None, extra_rules: list | None = None):
         self.config = config or DetectionConfig()
+        # extra single-event rules: callables(LogEvent) -> Alert | None
+        # (e.g. imported Sigma rules). Applied to every event.
+        self.extra_rules = list(extra_rules or [])
 
     def run(self, events: list[LogEvent]) -> list[Alert]:
         alerts: list[Alert] = []
@@ -50,6 +53,14 @@ class DetectionEngine:
         success_by_ip: dict[str, list[LogEvent]] = defaultdict(list)
 
         for ev in events:
+            # -- imported (Sigma) single-event rules --
+            for rule in self.extra_rules:
+                try:
+                    a = rule(ev)
+                except Exception:  # noqa: BLE001 - a bad imported rule can't break detection
+                    a = None
+                if a is not None:
+                    alerts.append(a)
             # -- signature (single-event) rules --
             if ev.event_type == "sudo_command":
                 cmd = ev.fields.get("cmd", ev.message)

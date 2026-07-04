@@ -92,6 +92,13 @@ DEFAULT_POLICY: dict = {
         # explicit target allowlist; empty means no host may be probed
         "scope": [],
     },
+    # Detection content: import Sigma rules and a threat-intel feed. All
+    # optional; broken files are skipped, never fatal.
+    "detection": {
+        "sigma_rules": [],        # list of Sigma YAML file paths
+        "sigma_inline": "",       # inline Sigma YAML (one or more docs)
+        "threat_feed": "",        # path to a JSON IOC feed
+    },
     "llm": {
         "enabled": True,
         "redact_before_send": True,
