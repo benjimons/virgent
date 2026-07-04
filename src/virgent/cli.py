@@ -453,6 +453,31 @@ def cmd_frameworks(args) -> int:
     return 0
 
 
+def cmd_sbom(args) -> int:
+    agent = _agent(args)
+    bom = agent.generate_sbom(name=args.name, output=args.output)
+    if args.output:
+        print(f"wrote SBOM ({len(bom['components'])} components): {args.output}")
+        if args.sign:
+            r = agent.sign_artifact(args.output)
+            print("signed: " + (r["signature"] or "(no signing key set)"))
+    else:
+        print(json.dumps(bom, indent=2))
+    return 0
+
+
+def cmd_sign(args) -> int:
+    agent = _agent(args)
+    if args.verify:
+        from virgent.signing import verify_file
+        ok = verify_file(args.path)
+        print(f"signature valid: {ok}")
+        return 0 if ok else 1
+    r = agent.sign_artifact(args.path)
+    print("signed: " + (r["signature"] or "(no signing key set — set VIRGENT_SIGNING_KEY)"))
+    return 0 if r["signed"] else 1
+
+
 def cmd_ciem(args) -> int:
     agent = _agent(args)
     findings = agent.ciem_analyze()
@@ -672,6 +697,15 @@ def main(argv: list[str] | None = None) -> int:
     p_assess.add_argument("--format", choices=["markdown", "json"], default="markdown")
     p_assess.add_argument("-o", "--output", default=None, help="write the report to a file")
 
+    p_sbom = sub.add_parser("sbom", help="generate a CycloneDX SBOM from ingested dependency manifests")
+    p_sbom.add_argument("--name", default="virgent-target")
+    p_sbom.add_argument("-o", "--output", default=None)
+    p_sbom.add_argument("--sign", action="store_true", help="also write a detached signature")
+
+    p_sign = sub.add_parser("sign", help="sign or verify an artifact (detached HMAC signature)")
+    p_sign.add_argument("path")
+    p_sign.add_argument("--verify", action="store_true", help="verify instead of sign")
+
     sub.add_parser("ciem", help="cloud/identity entitlement analysis (privilege concentration, toxic combos)")
     sub.add_parser("attackpaths", help="correlate findings into toxic attack paths")
 
@@ -718,6 +752,8 @@ def main(argv: list[str] | None = None) -> int:
         "scan": cmd_scan,
         "assess": cmd_assess,
         "identity": cmd_identity,
+        "sbom": cmd_sbom,
+        "sign": cmd_sign,
         "ciem": cmd_ciem,
         "attackpaths": cmd_attackpaths,
         "ccm": cmd_ccm,

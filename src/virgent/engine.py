@@ -26,8 +26,10 @@ from .capabilities import (
     HostInspectionCapability,
     IaCCapability,
     IdentityPostureCapability,
+    ImageScanCapability,
     LLMReviewCapability,
     RuntimeInspectionCapability,
+    SASTCapability,
     SecretScanCapability,
 )
 from .ccm import ControlMonitor
@@ -110,6 +112,8 @@ class SecurityAgent:
         self.register_capability(SecretScanCapability())
         self.register_capability(DependencyAuditCapability())
         self.register_capability(IaCCapability())
+        self.register_capability(SASTCapability())
+        self.register_capability(ImageScanCapability())
         self.register_capability(HostInspectionCapability())
         self.register_capability(RuntimeInspectionCapability())
         self.register_capability(CloudPostureCapability())
@@ -658,6 +662,32 @@ class SecurityAgent:
         from .org import select_runbooks
         inc = self.soc.casebook.get_incident(incident_id)
         return select_runbooks(inc.rules)
+
+    # -- SBOM & signing -------------------------------------------------------
+
+    def generate_sbom(self, name: str = "virgent-target", output: str | None = None) -> dict:
+        """Build a CycloneDX SBOM from the ingested dependency manifests (audited)."""
+        self._enforce("sbom.generate")
+        from .sbom import generate_sbom
+        bom = generate_sbom(self.load_evidence(), name=name)
+        if output:
+            Path(output).write_text(json.dumps(bom, indent=2), encoding="utf-8")
+        self.audit.record("sbom.generate", params={
+            "components": len(bom["components"]),
+            "serial": bom["serialNumber"],
+            "output": output,
+        })
+        return bom
+
+    def sign_artifact(self, path: str | Path) -> dict:
+        """Write a detached HMAC signature for an artifact (audited)."""
+        self._enforce("sign.artifact")
+        from .signing import sign_file
+        sig_path = sign_file(path)
+        result = {"path": str(path), "signed": sig_path is not None,
+                  "signature": str(sig_path) if sig_path else None}
+        self.audit.record("sign.artifact", params=result)
+        return result
 
     # -- CIEM & attack-path analysis ------------------------------------------
 
