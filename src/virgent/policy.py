@@ -35,6 +35,7 @@ DEFAULT_POLICY: dict = {
             "audit.*",
             "fim.*",
             "ccm.*",
+            "identity.reviews",
             "monitor.*",
             "vulns.*",
             "soc.*",
@@ -45,6 +46,7 @@ DEFAULT_POLICY: dict = {
             "collect.web",
             "discover.network",
             "discover.cloud",
+            "discover.identity",
             "pentest.*",
             "remediate.*",
             "respond.*",
@@ -72,6 +74,16 @@ DEFAULT_POLICY: dict = {
         "provider": "aws",
         "regions": [],         # e.g. ["us-east-1", "eu-west-1"]; empty = default region
     },
+    # Identity provider (IGA/IdP posture). Read-only; disabled by default;
+    # discover.identity is approval-gated. Token comes from a secret manager.
+    "identity": {
+        "enabled": False,
+        "provider": "okta",    # okta | entra | google
+        "org_url": "",
+        "token": "",
+    },
+    # Also allow the read-only 'identity.reviews' generation:
+    # (access-review generation is allowed by default; see actions.allow)
     "pentest": {
         # explicit target allowlist; empty means no host may be probed
         "scope": [],

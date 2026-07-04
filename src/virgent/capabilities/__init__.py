@@ -27,6 +27,7 @@ from .iac import IaCCapability                      # noqa: E402
 from .host import HostInspectionCapability          # noqa: E402
 from .runtime import RuntimeInspectionCapability     # noqa: E402
 from .cloud import CloudPostureCapability            # noqa: E402
+from .identity import IdentityPostureCapability       # noqa: E402
 from .llm_review import LLMReviewCapability         # noqa: E402
 
 __all__ = [
@@ -37,5 +38,6 @@ __all__ = [
     "HostInspectionCapability",
     "RuntimeInspectionCapability",
     "CloudPostureCapability",
+    "IdentityPostureCapability",
     "LLMReviewCapability",
 ]

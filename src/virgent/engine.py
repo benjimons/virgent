@@ -25,12 +25,14 @@ from .capabilities import (
     DependencyAuditCapability,
     HostInspectionCapability,
     IaCCapability,
+    IdentityPostureCapability,
     LLMReviewCapability,
     RuntimeInspectionCapability,
     SecretScanCapability,
 )
 from .ccm import ControlMonitor
 from .cloud import build_cloud_provider
+from .identity import build_identity_provider, generate_access_reviews
 from .compliance.report import generate_report
 from .ingest import (
     FileIngestor,
@@ -111,6 +113,7 @@ class SecurityAgent:
         self.register_capability(HostInspectionCapability())
         self.register_capability(RuntimeInspectionCapability())
         self.register_capability(CloudPostureCapability())
+        self.register_capability(IdentityPostureCapability())
         if self.provider is not None:
             self.register_capability(LLMReviewCapability(reason=self.reason))
 
@@ -119,6 +122,7 @@ class SecurityAgent:
         self.discoverer = AssetDiscoverer.from_policy(self.policy.policy)
         # cloud provider (None unless policy 'cloud.enabled'); inject for tests
         self.cloud_provider = build_cloud_provider(self.policy.policy)
+        self.identity_provider = build_identity_provider(self.policy.policy)
         self.ccm = ControlMonitor(self.workdir / "ccm_state.json")
         self.pentest_prober = None  # inject a Prober for tests/dry-runs
 
@@ -298,7 +302,39 @@ class SecurityAgent:
         })
         return resources
 
-    def autodiscover(self, network: bool = False, cloud: bool = False) -> dict:
+    def discover_identity(self) -> list:
+        """Enumerate the identity provider's accounts (read-only, gated, audited)."""
+        self._enforce("discover.identity")
+        if self.identity_provider is None:
+            raise RuntimeError(
+                "no identity provider configured (set policy 'identity.enabled: true' "
+                "and 'identity.provider', or inject agent.identity_provider)")
+        accounts = self.identity_provider.enumerate()
+        for a in accounts:
+            self.provenance.register(
+                source=f"identity:{a.provider}:{a.id}", method="discover.identity",
+                kind="identity-account", content=json.dumps(a.to_dict(), sort_keys=True),
+                collector=self.actor, metadata={"provider": a.provider, "account": a.id})
+        self.audit.record("discover.identity", params={
+            "provider": self.identity_provider.name,
+            "accounts": len(accounts),
+            "admins": sum(1 for a in accounts if a.admin),
+        })
+        return accounts
+
+    def access_reviews(self) -> list[dict]:
+        """Generate access-review (recertification) items from IdP accounts (audited)."""
+        self._enforce("identity.reviews")
+        accounts = self.identity_provider.enumerate() if self.identity_provider else []
+        reviews = generate_access_reviews(accounts)
+        self.audit.record("identity.reviews", params={
+            "accounts": len(accounts), "reviews": len(reviews),
+            "revoke": sum(1 for r in reviews if r.recommendation == "revoke"),
+        })
+        return [r.to_dict() for r in reviews]
+
+    def autodiscover(self, network: bool = False, cloud: bool = False,
+                     identity: bool = False) -> dict:
         """Discover assets and automatically ingest each through the right
         ingestor — the fully autonomous "find your own work" path. Network
         services and cloud resources are recorded as inventory/asset evidence.
@@ -309,6 +345,9 @@ class SecurityAgent:
         cloud_resources = 0
         if cloud:
             cloud_resources = len(self.discover_cloud())
+        identity_accounts = 0
+        if identity:
+            identity_accounts = len(self.discover_identity())
         for t in targets:
             if t.ingestor == "file":
                 self.ingest(t.locator, ingestor="file")
@@ -330,7 +369,8 @@ class SecurityAgent:
                     collector=self.actor, metadata=t.metadata)
                 inventory += 1
         summary = {"targets": len(targets), "ingested": ingested,
-                   "inventory": inventory, "cloud_resources": cloud_resources}
+                   "inventory": inventory, "cloud_resources": cloud_resources,
+                   "identity_accounts": identity_accounts}
         self.audit.record("discover.ingest", params=summary)
         return summary
 

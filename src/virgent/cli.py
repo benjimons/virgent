@@ -453,6 +453,25 @@ def cmd_frameworks(args) -> int:
     return 0
 
 
+def cmd_identity(args) -> int:
+    agent = _agent(args)
+    human = Actor(id=f"cli:{getpass.getuser()}", type="human")
+    if args.identity_command == "reviews":
+        reviews = agent.access_reviews()
+        for r in reviews:
+            print(f"  [{r['risk']:6}] {r['recommendation']:11} {r['account']:28} {r['item']}")
+        print(f"\n{len(reviews)} access-review item(s).")
+        return 0
+    # discover + scan posture
+    agent.approve("discover.identity", human)
+    accounts = agent.discover_identity()
+    print(f"enumerated {len(accounts)} identity account(s) from {agent.identity_provider.name}")
+    findings = agent.scan(capabilities=["identity"])
+    _print_findings(findings)
+    print(f"\n{len(findings)} identity finding(s).")
+    return 0
+
+
 def cmd_ccm(args) -> int:
     agent = _agent(args)
     result = agent.ccm_assess()
@@ -635,6 +654,11 @@ def main(argv: list[str] | None = None) -> int:
     p_assess.add_argument("--format", choices=["markdown", "json"], default="markdown")
     p_assess.add_argument("-o", "--output", default=None, help="write the report to a file")
 
+    p_identity = sub.add_parser("identity", help="identity posture (IdP hygiene) and access reviews")
+    id_sub = p_identity.add_subparsers(dest="identity_command")
+    id_sub.add_parser("posture", help="enumerate IdP accounts and scan for hygiene issues (gated)")
+    id_sub.add_parser("reviews", help="generate access-review (recertification) items")
+
     p_ccm = sub.add_parser("ccm", help="continuous control monitoring: per-control pass/fail + SLA")
     ccm_sub = p_ccm.add_subparsers(dest="ccm_command")
     ccm_sub.add_parser("list", help="show each monitored control's status (default)")
@@ -672,6 +696,7 @@ def main(argv: list[str] | None = None) -> int:
         "decide": cmd_decide,
         "scan": cmd_scan,
         "assess": cmd_assess,
+        "identity": cmd_identity,
         "ccm": cmd_ccm,
         "report": cmd_report,
         "audit": cmd_audit,
