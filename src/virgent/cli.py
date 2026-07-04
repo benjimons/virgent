@@ -232,6 +232,19 @@ def cmd_soc(args) -> int:
     return 2
 
 
+def cmd_notify(args) -> int:
+    agent = _agent(args)
+    if args.notify_command == "test":
+        results = agent.notify_test()
+        if not results:
+            print("no channels configured (see the 'notify' block in policy.yaml)")
+        for r in results:
+            print(f"  {r.get('channel', '?'):8} -> {r.get('status')}"
+                  + (f"  ({r.get('detail')})" if r.get("detail") else ""))
+        return 0
+    return 2
+
+
 def cmd_decisions(args) -> int:
     agent = _agent(args)
     pending = agent.pending_decisions()
@@ -474,7 +487,11 @@ def main(argv: list[str] | None = None) -> int:
     p_watch.add_argument("--interval", type=int, default=60, help="seconds between ticks (default 60)")
     p_watch.add_argument("--rounds", type=int, default=0, help="stop after N ticks (default: run forever)")
     p_watch.add_argument("--capability", action="append", help="capabilities to run each tick")
-    p_watch.add_argument("--log", action="append", help="log file to re-ingest + run SOC detection each tick (repeatable)")
+    p_watch.add_argument("--log", action="append", help="log file to tail + run SOC detection each tick (repeatable, offset-tracked)")
+
+    p_notify = sub.add_parser("notify", help="notification channels (decisions, incidents)")
+    notify_sub = p_notify.add_subparsers(dest="notify_command", required=True)
+    notify_sub.add_parser("test", help="send a test notification through every configured channel")
 
     p_soc = sub.add_parser("soc", help="security operations: detect, triage, respond to incidents")
     soc_sub = p_soc.add_subparsers(dest="soc_command", required=True)
@@ -557,6 +574,7 @@ def main(argv: list[str] | None = None) -> int:
         "runtime": cmd_runtime,
         "fim": cmd_fim,
         "watch": cmd_watch,
+        "notify": cmd_notify,
         "pentest": cmd_pentest,
         "vulns": cmd_vulns,
         "soc": cmd_soc,

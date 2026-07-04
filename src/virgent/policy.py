@@ -28,6 +28,7 @@ DEFAULT_POLICY: dict = {
             "ingest.*",
             "collect.host",
             "collect.runtime",
+            "collect.tail",
             "scan.*",
             "report.*",
             "audit.*",
@@ -35,6 +36,7 @@ DEFAULT_POLICY: dict = {
             "monitor.*",
             "vulns.*",
             "soc.*",
+            "notify.*",
             "llm.complete",
         ],
         "require_approval": [
@@ -77,6 +79,30 @@ DEFAULT_POLICY: dict = {
             "destructive": "admin",
         },
         "risk_threshold": 80,
+    },
+    # Notifications: where "a human is needed / something happened" goes.
+    # Webhook/Slack hosts must also be in network.allowed_domains.
+    "notify": {
+        "enabled": True,
+        "min_severity": "high",
+        "channels": [
+            {"type": "file", "path": "notifications.jsonl"},
+            # {"type": "stdout"},
+            # {"type": "slack", "url": "https://hooks.slack.com/services/…"},
+            # {"type": "webhook", "url": "https://soc.example.com/hook"},
+        ],
+    },
+    # Response executor: how an *already-authorized* action touches production.
+    # Default (omitted / "dryrun") changes nothing. A real executor never
+    # widens what is allowed — the access model still gates every action.
+    "response": {
+        "executor": {
+            "type": "dryrun",
+            # "type": "command",
+            # "templates": {"block_ip": ["nft", "add", "element", "inet", "fw", "blocked", "{ip}"]},
+            # "type": "webhook",
+            # "url": "https://soar.example.com/execute",
+        },
     },
 }
 

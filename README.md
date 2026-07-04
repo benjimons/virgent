@@ -115,6 +115,32 @@ High **risk** bumps the required role up the chain (a CRITICAL incident's
 approver escalates it further rather than resolving it. Approvals persist and
 are consumed once. Everything is audited. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Running always-on
+
+One process monitors the live system forever — host hardening drift,
+runtime indicators (reverse shells, staging dirs, exposed services), file
+integrity, and SOC detection over your logs:
+
+```bash
+virgent fim baseline /etc/ssh/sshd_config /etc/passwd /etc/sudoers
+virgent watch --interval 60 --log /var/log/auth.log     # offset-tracked tailing
+```
+
+- **Log tailing** follows growing logs without re-ingesting them, and handles
+  rotation/truncation.
+- **Notifications** push decisions and new high-severity incidents to
+  stdout/file/webhook/Slack (configure the `notify` block; `virgent notify
+  test`). Network channels are domain-allowlisted; dispatch never breaks the
+  pipeline.
+- **Response executors** are dry-run by default. Configure `response.executor`
+  (command or webhook/SOAR) to let an *already-authorized* action touch
+  production — the access model still gates every action; params are strictly
+  validated and run with no shell.
+
+Deploy it as a service with `deploy/virgent-watch.service` (systemd) or
+`deploy/docker-compose.yml`. Full topology, durability/WORM guidance, and the
+human decision loop are in [deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md).
+
 ## Compliance
 
 ```bash

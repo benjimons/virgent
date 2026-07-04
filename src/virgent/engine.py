@@ -45,14 +45,17 @@ from .access import (
     Sensitivity,
 )
 from .ingest.runtime import RuntimeIngestor
+from .ingest.tail import TailIngestor
 from .integrity import IntegrityMonitor
+from .notify import Notification, build_dispatcher
 from .pentest import PenTester
 from .policy import PolicyDecision
 from .soc import SOC
+from .soc.executors import build_executor
 from .soc.response import ACTIONS as RESPONSE_ACTIONS
 from .vulnmgmt import VulnerabilityRegister
 from .llm.provider import LLMResult, ReasoningProvider
-from .models import Actor, Evidence, Finding
+from .models import Actor, Evidence, Finding, Severity
 from .policy import PolicyEngine, PolicyViolation
 from .provenance import ProvenanceStore
 from .redaction import redact
@@ -62,7 +65,10 @@ __version__ = "0.1.0"
 DEFAULT_ACTOR = Actor(id="virgent", type="agent")
 
 # ingestor name -> audited action (default is ingest.<name>)
-_INGEST_ACTIONS = {"web": "collect.web", "host": "collect.host", "runtime": "collect.runtime"}
+_INGEST_ACTIONS = {
+    "web": "collect.web", "host": "collect.host",
+    "runtime": "collect.runtime", "tail": "collect.tail",
+}
 
 
 class SecurityAgent:
@@ -89,6 +95,7 @@ class SecurityAgent:
             "git": GitHistoryIngestor(),
             "host": HostIngestor(),
             "runtime": RuntimeIngestor(),
+            "tail": TailIngestor(self.workdir / "tail_state.json"),
             "web": WebCollector(
                 allowed_domains=(self.policy.policy.get("network") or {}).get("allowed_domains") or [],
             ),
@@ -106,15 +113,25 @@ class SecurityAgent:
         self.vulns = VulnerabilityRegister(self.workdir / "vuln_register.json")
         self.pentest_prober = None  # inject a Prober for tests/dry-runs
 
-        # access & autonomy model (Graduated Autonomy with Escalation)
+        # notifications (stdout/file/webhook/slack); network channels are
+        # domain-allowlisted by policy and dispatch never breaks the pipeline
+        self.notifier = build_dispatcher(
+            self.policy.policy, domain_check=self.policy.domain_allowed, workdir=self.workdir)
+
+        # access & autonomy model (Graduated Autonomy with Escalation).
+        # Decision events are audited AND surfaced to humans via notifications.
         self.autonomy = AutonomyPolicy.from_policy(self.policy.policy)
         self.broker = DecisionBroker(
-            self.workdir / "decisions.json", self.autonomy, audit=self.audit.record)
+            self.workdir / "decisions.json", self.autonomy, audit=self._audit_and_notify)
 
         # SOC
         soc_reason = self.reason if self.provider is not None else None
         self.soc = SOC(self.workdir / "soc", reason=soc_reason)
-        self.response_executor = None  # inject a ResponseExecutor; default is dry-run
+        # real response executor from policy (default None -> dry-run); actions
+        # are gated by the access model regardless of which executor runs them
+        self.response_executor = build_executor(
+            self.policy.policy, domain_check=self.policy.domain_allowed)
+        self._notified_incidents_path = self.workdir / "notified_incidents.json"
 
         self.audit.record("agent.init", params={
             "version": __version__,
@@ -137,6 +154,79 @@ class SecurityAgent:
             )
             raise PolicyViolation(decision)
         return decision
+
+    # -- notifications --------------------------------------------------------
+
+    def _audit_and_notify(self, event: str, params: dict | None = None, **kw) -> None:
+        """Broker audit callback: record the event, then notify humans of the
+        ones that need their attention (a decision waiting, or an escalation)."""
+        self.audit.record(event, params=params or {}, **kw)
+        params = params or {}
+        if event == "decision.requested":
+            self._safe_notify(Notification(
+                kind="decision.requested",
+                title=f"Human decision needed: {params.get('action', '?')}",
+                severity=Severity.HIGH,
+                body=(f"A '{params.get('sensitivity', '?')}' action requires a "
+                      f"'{params.get('required_role', '?')}' to approve. "
+                      f"Decision id: {params.get('id', '?')} "
+                      f"(virgent decide {params.get('id', '?')} approve --role "
+                      f"{params.get('required_role', '?')})"),
+                data=params))
+        elif event == "decision.escalated":
+            self._safe_notify(Notification(
+                kind="decision.escalated",
+                title=f"Decision escalated: {params.get('id', '?')}",
+                severity=Severity.HIGH,
+                body=(f"Escalated by {params.get('by', '?')} ({params.get('role', '?')}); "
+                      f"now needs role >= {params.get('required_role', '?')}."),
+                data=params))
+
+    def _safe_notify(self, notification: Notification) -> list[dict]:
+        """Redact then dispatch a notification. Never raises."""
+        try:
+            notification.body = redact(notification.body)[0]
+            return self.notifier.dispatch(notification)
+        except Exception:  # noqa: BLE001 - notification must not break anything
+            return []
+
+    def _load_notified_incidents(self) -> set[str]:
+        if self._notified_incidents_path.exists():
+            try:
+                return set(json.loads(self._notified_incidents_path.read_text()))
+            except (json.JSONDecodeError, OSError):
+                return set()
+        return set()
+
+    def _notify_new_incidents(self, incidents: list) -> None:
+        seen = self._load_notified_incidents()
+        changed = False
+        for inc in incidents:
+            if inc.id in seen:
+                continue
+            self._safe_notify(Notification(
+                kind="incident",
+                title=f"[{inc.priority}] {inc.title}",
+                severity=inc.severity,
+                body=(f"Rules: {', '.join(inc.rules)}. "
+                      f"Entities: {inc.entities}. Recommended: "
+                      f"{', '.join(a['action'] for a in self.soc.plan(inc.id))}."),
+                data={"incident": inc.id, "severity": inc.severity.value}))
+            seen.add(inc.id)
+            changed = True
+        if changed:
+            self._notified_incidents_path.write_text(
+                json.dumps(sorted(seen)), encoding="utf-8")
+
+    def notify_test(self) -> list[dict]:
+        """Send a test notification through every configured channel (audited)."""
+        self._enforce("notify.test")
+        results = self._safe_notify(Notification(
+            kind="test", title="Virgent notification test",
+            severity=Severity.HIGH, body="If you can read this, notifications work."))
+        self.audit.record("notify.test", params={"channels": len(self.notifier.notifiers),
+                                                 "results": results})
+        return results
 
     def approve(self, action_pattern: str, approver: Actor) -> None:
         """Record a human approval for a restricted action (audited)."""
@@ -363,6 +453,7 @@ class SecurityAgent:
             "incidents": len(incidents),
             "incident_ids": [i.id for i in incidents],
         })
+        self._notify_new_incidents(incidents)
         return alerts, incidents
 
     def soc_triage(self, incident_id: str):
@@ -519,7 +610,8 @@ class SecurityAgent:
         if log_sources:
             for src in log_sources:
                 try:
-                    self.ingest(src, ingestor="file")
+                    # offset-tracked: only new lines are ingested each cycle
+                    self.ingest(src, ingestor="tail")
                 except (FileNotFoundError, OSError):
                     continue
             _, incidents = self.soc_detect()

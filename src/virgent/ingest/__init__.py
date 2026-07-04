@@ -32,6 +32,7 @@ class Ingestor(ABC):
 from .files import FileIngestor          # noqa: E402
 from .git_history import GitHistoryIngestor  # noqa: E402
 from .host import HostIngestor              # noqa: E402
+from .tail import TailIngestor              # noqa: E402
 from .web import WebCollector, query_osv     # noqa: E402
 
 __all__ = [
@@ -40,6 +41,7 @@ __all__ = [
     "FileIngestor",
     "GitHistoryIngestor",
     "HostIngestor",
+    "TailIngestor",
     "WebCollector",
     "query_osv",
 ]

@@ -99,12 +99,47 @@ Two simple topologies today:
   single `virgent watch --log ...` there for SOC detection, plus per-host
   agents for host/runtime/FIM (which need local access).
 
+## Notifications (a human is needed / something happened)
+
+Configure channels in the `notify` block of `policy.yaml` — decisions and
+new high-severity incidents are pushed automatically (webhook/Slack hosts must
+also be in `network.allowed_domains`):
+
+```yaml
+notify:
+  enabled: true
+  min_severity: high
+  channels:
+    - {type: file, path: notifications.jsonl}
+    - {type: slack, url: https://hooks.slack.com/services/…}   # host must be allowlisted
+network:
+  allowed_domains: [api.osv.dev, hooks.slack.com]
+```
+
+Verify with `virgent notify test`. Dispatch is best-effort — a broken channel
+is logged, never fatal — and bodies are redacted before they leave.
+
+## Real response actions (still human-gated)
+
+By default responses are dry-run. To let an *already-authorized* action touch
+production, configure an executor in `policy.yaml`. The access model still
+gates every action — the executor only changes *how* an approved action runs:
+
+```yaml
+response:
+  executor:
+    type: command                     # or 'webhook' (to a SOAR endpoint)
+    templates:
+      block_ip: ["nft", "add", "element", "inet", "fw", "blocked", "{ip}"]
+```
+
+Params (`{ip}`/`{user}`/`{host}`/`{path}`) come from log-derived entities and
+are strictly validated before use; commands run with no shell.
+
 ## What's intentionally not here yet
 
-Virgent is a CLI + service today, not a distributed platform. A built-in
-daemon with log *tailing* (vs. re-ingesting a file each cycle), a central
-API/console, native notifiers, and real response executors (firewall/EDR/IAM)
-are the roadmap (see `CONTINUATION.md` §6). The loop re-ingests named logs
-each cycle and dedups by stable identity, which is correct but not
-offset-tracked — fine for steady auth/syslog volumes, and the natural next
-step for high-volume sources.
+Virgent is a CLI + service today, not a distributed platform. Log tailing is
+offset-tracked (it follows growth, handles rotation) but poll-per-cycle rather
+than inotify-streamed — fine for steady auth/syslog volumes. A central
+API/console, cloud-config ingestors, and native EDR/IAM executor connectors
+are the remaining roadmap (see `CONTINUATION.md` §6).

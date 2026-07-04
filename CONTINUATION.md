@@ -51,7 +51,10 @@ Audit log = SHA-256 hash chain, optional per-record HMAC (`VIRGENT_AUDIT_KEY`).
 - **CLI**: init, list, frameworks, org, posture, ingest, host, runtime, fim,
   watch, pentest, vulns, soc, decisions, decide, scan, assess, report, audit,
   ask.
-- **Tests**: 113 passing (`pytest`). **CI**: `.github/workflows/ci.yml`.
+- **Always-on**: `monitor_cycle`, offset-tracked log tailing (`ingest/tail.py`),
+  notification dispatcher (`notify/`), real response executors
+  (`soc/executors.py`); `deploy/` has systemd/Docker/compose + DEPLOYMENT.md.
+- **Tests**: 135 passing (`pytest`). **CI**: `.github/workflows/ci.yml`.
 
 ## 4. Status
 
@@ -70,17 +73,30 @@ virgent init && virgent assess . --host --runtime -o report.md
 virgent posture && virgent audit verify
 ```
 
-## 6. Roadmap (not yet built)
+## 6. Roadmap (each must respect the invariants in §2)
 
-Priority-ordered; each must respect the invariants in §2:
-1. Real response executors (behind the dry-run interface): firewall/EDR/IAM
-   connectors, still gated by the access model.
-2. More ingestors: cloud APIs (AWS/GCP/Azure config), SIEM/EDR exports,
-   syslog/journald streaming, ticketing/chat for notify actions.
-3. More detection rules + a rule DSL (Sigma import); threat-intel enrichment.
-4. SBOM (CycloneDX) export; more dependency ecosystems (go.mod, Cargo, Maven).
-5. Report signing (portable attestation) and WORM audit-log shipping.
-6. A web/API surface over the engine for a human console.
+Done since the initial build:
+- **Always-on deployment**: `engine.monitor_cycle` (host+runtime+FIM+SOC in
+  one loop), `virgent watch --log`, `deploy/` (systemd/Docker/compose +
+  DEPLOYMENT.md).
+- **Offset-tracked log tailing** (`ingest/tail.py`): follows growing logs
+  without re-ingesting; rotation/truncation-aware. `watch --log` uses it.
+- **Notifications** (`notify/`): stdout/file/webhook/slack, fire on
+  `decision.requested`/`escalated` and new high-sev incidents, domain-gated,
+  never break the pipeline. Config in policy `notify`; `virgent notify test`.
+- **Real response executors** (`soc/executors.py`): CommandExecutor +
+  WebhookExecutor behind the dry-run interface, strict param validation, still
+  gated by the access model. Config in policy `response.executor`.
+
+Still open, priority-ordered:
+1. Cloud-config ingestors (AWS/GCP/Azure), SIEM/EDR exports; true streaming
+   tail (inotify) vs. poll-per-cycle.
+2. Detection rule DSL (Sigma import); threat-intel enrichment.
+3. SBOM (CycloneDX) export; more dependency ecosystems (go.mod, Cargo, Maven).
+4. Report signing (portable attestation) and automated WORM log shipping.
+5. A web/API surface over the engine for a human console.
+6. More executor connectors (native EDR/IAM SDKs) + a CompositeExecutor that
+   routes different actions to different backends.
 
 ## 7. Conventions
 

@@ -36,6 +36,8 @@ jobs:
           virgent --workdir /tmp/wd scan
           virgent --workdir /tmp/wd host --scan
           virgent --workdir /tmp/wd runtime --scan
+          virgent --workdir /tmp/wd notify test
+          virgent --workdir /tmp/wd watch --rounds 1 --interval 0 --capability runtime --log /tmp/demo/auth.log
           virgent --workdir /tmp/wd soc detect
           virgent --workdir /tmp/wd vulns sync
           virgent --workdir /tmp/wd posture
